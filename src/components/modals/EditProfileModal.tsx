@@ -27,13 +27,13 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && currentUser) {
       setName(currentUser.name);
       setDisplayName(currentUser.displayName || currentUser.name);
       setPhone(currentUser.phone || '');
       setJobTitle(currentUser.jobTitle || '');
       setPreferredLanguage(currentUser.preferredLanguage || 'English (UK)');
-      setAvatarPreview(currentUser.avatarUrl || null);
+      setAvatarPreview(currentUser?.avatarUrl || null);
       setError(null);
     }
   }, [isOpen, currentUser]);
@@ -160,12 +160,12 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
               >
                 Upload Photo
               </Button>
-              {avatarPreview && avatarPreview !== currentUser.avatarUrl && (
+              {avatarPreview && avatarPreview !== currentUser?.avatarUrl && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setAvatarPreview(currentUser.avatarUrl || null)}
+                  onClick={() => setAvatarPreview(currentUser?.avatarUrl || null)}
                 >
                   Reset
                 </Button>
@@ -231,7 +231,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
               <span>Email Address:</span>
             </span>
             <span className="font-semibold text-slate-800 dark:text-neutral-200 font-mono text-[11px]">
-              {currentUser.email}
+              {currentUser?.email || 'N/A'}
             </span>
           </div>
 
@@ -241,7 +241,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
               <span>Enterprise Role:</span>
             </span>
             <span className="font-semibold text-emerald-700 dark:text-emerald-400">
-              {currentUser.role}
+              {currentUser?.role || 'Guest'}
             </span>
           </div>
 

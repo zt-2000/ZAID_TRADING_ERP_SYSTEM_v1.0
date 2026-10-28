@@ -18,23 +18,19 @@ export const checkSupabaseConnection = async (): Promise<SyncStatus> => {
     return {
       isConfigured: false,
       connected: false,
-      message: 'Supabase URL or Anon Key not configured in environment (VITE_SUPABASE_URL). Operating in local storage mode.',
+      message: 'Supabase configuration missing (VITE_SUPABASE_URL).',
     };
   }
 
   try {
-    const { error } = await supabase.from('companies').select('id').limit(1);
-    if (error) {
-      return {
-        isConfigured: true,
-        connected: false,
-        message: `Supabase key set but query returned: ${error.message}`,
-      };
-    }
+    // Check auth status as a lightweight connection test
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    
     return {
       isConfigured: true,
       connected: true,
-      message: 'Connected to Supabase PostgreSQL database with active RLS policy.',
+      message: 'Connected to Supabase.',
     };
   } catch (err: any) {
     return {
@@ -118,7 +114,8 @@ export const migrateLocalDataToCloud = async (): Promise<{
   await syncLocalKey('zaid_erp_quotations', 'quotations');
   await syncLocalKey('zaid_erp_sales_orders', 'sales_orders');
   await syncLocalKey('zaid_erp_expenses', 'expenses');
-  await syncLocalKey('zaid_erp_gl_transactions', 'general_ledger');
+  // NOTE: general_ledger (zaid_erp_gl_transactions) MUST NOT be synced via upsert.
+  // It requires the authorized post_journal_voucher RPC to maintain ledger integrity.
 
   return {
     success: errors.length === 0,

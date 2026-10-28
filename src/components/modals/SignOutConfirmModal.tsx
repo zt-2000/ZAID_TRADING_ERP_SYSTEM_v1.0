@@ -49,7 +49,7 @@ export const SignOutConfirmModal: React.FC<SignOutConfirmModalProps> = ({ isOpen
           <div className="text-xs text-amber-900 dark:text-amber-300">
             <p className="font-semibold">Sign out active operator?</p>
             <p className="mt-1 text-[11px] leading-relaxed text-amber-800 dark:text-amber-400">
-              You are signed in as <strong>{currentUser.name}</strong> ({currentUser.email}). Make sure all unsaved invoice vouchers or draft purchase orders have been posted before signing out.
+              You are signed in as <strong>{currentUser?.name || 'User'}</strong> ({currentUser?.email || 'N/A'}). Make sure all unsaved invoice vouchers or draft purchase orders have been posted before signing out.
             </p>
           </div>
         </div>

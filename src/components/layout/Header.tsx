@@ -25,7 +25,7 @@ interface HeaderProps {
   onOpenSearch: () => void;
   onOpenNotifications: () => void;
   unreadNotificationsCount?: number;
-  currentUser: UserProfile;
+  currentUser?: UserProfile | null;
   onOpenMyProfile: () => void;
   onOpenEditProfile: () => void;
   onOpenAccountSecurity: () => void;
@@ -209,12 +209,12 @@ export const Header: React.FC<HeaderProps> = ({
             aria-haspopup="true"
           >
             <img
-              src={currentUser.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80'}
-              alt={currentUser.name}
+              src={currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80'}
+              alt={currentUser?.name || 'User'}
               className="w-7 h-7 rounded-full object-cover ring-1 ring-slate-200 dark:ring-neutral-700"
             />
             <span className="hidden md:inline-block text-xs font-semibold text-slate-800 dark:text-neutral-200 max-w-[120px] truncate">
-              {currentUser.displayName || currentUser.name.split(' ')[0]}
+              {currentUser?.displayName || currentUser?.name?.split(' ')[0] || 'Guest'}
             </span>
             <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
           </button>
@@ -225,19 +225,19 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Header with User Info */}
               <div className="px-4 py-3 border-b border-slate-100 dark:border-neutral-800/80 flex items-center gap-3">
                 <img
-                  src={currentUser.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80'}
-                  alt={currentUser.name}
+                  src={currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80'}
+                  alt={currentUser?.name || 'User'}
                   className="w-10 h-10 rounded-full object-cover ring-1 ring-[#167a53]/40"
                 />
                 <div className="min-w-0 flex-1">
                   <p className="font-bold text-slate-900 dark:text-neutral-100 truncate">
-                    {currentUser.name}
+                    {currentUser?.name || 'Not signed in'}
                   </p>
                   <p className="text-[11px] text-slate-500 dark:text-neutral-400 truncate">
-                    {currentUser.email}
+                    {currentUser?.email || 'Please sign in'}
                   </p>
                   <span className="inline-block mt-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded">
-                    {currentUser.role}
+                    {currentUser?.role || 'Guest'}
                   </span>
                 </div>
               </div>

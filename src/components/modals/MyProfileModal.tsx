@@ -76,42 +76,42 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-5 rounded-2xl bg-gradient-to-br from-slate-50 to-white dark:from-[#18211c] dark:to-[#141a16] border border-slate-200/80 dark:border-neutral-800 shadow-xs">
           <div className="relative">
             <img
-              src={currentUser.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80'}
-              alt={currentUser.name}
+              src={currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80'}
+              alt={currentUser?.name || 'User'}
               className="w-16 h-16 rounded-2xl object-cover ring-2 ring-[#167a53]/30 shadow-sm"
             />
             <span
               className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white dark:border-[#141a16] ${
-                currentUser.status === 'active' ? 'bg-emerald-500' : 'bg-rose-500'
+                currentUser?.status === 'active' ? 'bg-emerald-500' : 'bg-rose-500'
               }`}
-              title={currentUser.status === 'active' ? 'Active account' : 'Inactive account'}
+              title={currentUser?.status === 'active' ? 'Active account' : 'Inactive account'}
             />
           </div>
 
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-lg font-bold text-slate-900 dark:text-neutral-100">
-                {currentUser.name}
+                {currentUser?.name || 'Not signed in'}
               </h2>
-              {currentUser.displayName && currentUser.displayName !== currentUser.name && (
+              {currentUser?.displayName && currentUser?.displayName !== currentUser?.name && (
                 <span className="text-xs text-slate-500 dark:text-neutral-400 font-medium">
                   ({currentUser.displayName})
                 </span>
               )}
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>{currentUser.role}</span>
+                <span>{currentUser?.role || 'Guest'}</span>
               </span>
             </div>
 
             <p className="text-xs text-slate-600 dark:text-neutral-400 mt-1 flex items-center gap-1.5">
               <Briefcase className="w-3.5 h-3.5 text-slate-400" />
-              <span>{currentUser.jobTitle || 'Executive Staff'}</span>
+              <span>{currentUser?.jobTitle || 'Executive Staff'}</span>
             </p>
 
             <p className="text-xs text-slate-500 dark:text-neutral-400 mt-0.5 flex items-center gap-1.5">
               <Building className="w-3.5 h-3.5 text-slate-400" />
-              <span>{currentUser.assignedWarehouse || 'Colombo Central Logistics Hub'}</span>
+              <span>{currentUser?.assignedWarehouse || 'Colombo Central Logistics Hub'}</span>
             </p>
           </div>
         </div>
@@ -124,7 +124,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({
               <span>Email Address</span>
             </div>
             <p className="text-xs font-semibold text-slate-900 dark:text-neutral-100 break-all">
-              {currentUser.email}
+              {currentUser?.email || 'N/A'}
             </p>
             <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
               <CheckCircle2 className="w-3 h-3" />
@@ -138,7 +138,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({
               <span>Phone / Contact</span>
             </div>
             <p className="text-xs font-semibold text-slate-900 dark:text-neutral-100">
-              {currentUser.phone || 'Not configured'}
+              {currentUser?.phone || 'Not configured'}
             </p>
             <p className="text-[11px] text-slate-400 mt-1">Direct operations mobile</p>
           </div>
@@ -149,7 +149,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({
               <span>Language & Locale</span>
             </div>
             <p className="text-xs font-semibold text-slate-900 dark:text-neutral-100">
-              {currentUser.preferredLanguage || 'English (UK)'}
+              {currentUser?.preferredLanguage || 'English (UK)'}
             </p>
             <p className="text-[11px] text-slate-400 mt-1">Regional interface localization</p>
           </div>
@@ -160,7 +160,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({
               <span>Member Since</span>
             </div>
             <p className="text-xs font-semibold text-slate-900 dark:text-neutral-100">
-              {currentUser.createdAt ? formatDateOnly(currentUser.createdAt) : 'January 15, 2024'}
+              {currentUser?.createdAt ? formatDateOnly(currentUser.createdAt) : 'January 15, 2024'}
             </p>
             <p className="text-[11px] text-slate-400 mt-1">Immutable account creation date</p>
           </div>
@@ -173,7 +173,7 @@ export const MyProfileModal: React.FC<MyProfileModalProps> = ({
             <span>Role-Based Access Control Scope</span>
           </p>
           <p className="mt-1 text-slate-600 dark:text-neutral-400 leading-relaxed">
-            Your role is assigned as <strong>{currentUser.role}</strong>. In accordance with enterprise governance, roles, permissions, and account status are strictly managed through the Users & Permissions module by designated administrators.
+            Your role is assigned as <strong>{currentUser?.role || 'Guest'}</strong>. In accordance with enterprise governance, roles, permissions, and account status are strictly managed through the Users & Permissions module by designated administrators.
           </p>
         </div>
       </div>

@@ -23,7 +23,7 @@ interface SidebarProps {
   onNavigate: (section: NavigationSection) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
-  currentUser: UserProfile;
+  currentUser?: UserProfile | null;
   companySettings?: CompanySettings;
   onOpenUserMenu: () => void;
   isMobileOpen?: boolean;
@@ -193,18 +193,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           }`}
         >
           <img
-            src={currentUser.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80'}
-            alt={currentUser.name}
+            src={currentUser?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80'}
+            alt={currentUser?.name || 'User'}
             className="w-8 h-8 rounded-full object-cover shrink-0 ring-1 ring-slate-200 dark:ring-neutral-700"
           />
           {!isCollapsed && (
             <>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold text-slate-900 dark:text-neutral-100 truncate">
-                  {currentUser.name}
+                  {currentUser?.name || 'Not signed in'}
                 </p>
                 <p className="text-[11px] text-slate-500 dark:text-neutral-400 truncate">
-                  {currentUser.role}
+                  {currentUser?.role || 'Guest'}
                 </p>
               </div>
               <ChevronsUpDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />

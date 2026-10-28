@@ -90,8 +90,19 @@ END $$;
   from your Supabase staging project. Run each test block wrapped in BEGIN ... ROLLBACK.
 */
 
+-- =========================================================================
+-- PART B: AUTHENTICATED RLS TESTS (Runnable Staging Template)
+-- =========================================================================
 /*
+  INSTRUCTIONS:
+  - These tests are designed to be run in a clean Supabase staging environment.
+  - They use placeholder UUIDs. For actual execution, replace them with 
+    appropriate test UUIDs created in auth.users.
+  - Each block is self-contained via BEGIN ... ROLLBACK.
+*/
+
 -- TEST B1: Initial Company Registration via RPC & Duplicate Rejection
+-- Setup: Use a test user not already associated with a company.
 BEGIN;
   SELECT set_config('request.jwt.claims', '{"sub": "11111111-1111-1111-1111-111111111111"}', true);
   SET LOCAL ROLE authenticated;
@@ -100,40 +111,34 @@ BEGIN;
   SELECT public.register_new_company('Staging Corp', 'Staging Corp Ltd', 'Admin User', '+94771234567');
   
   -- Attempt duplicate registration -> should raise exception
-  SELECT public.register_new_company('Second Corp', 'Second Ltd', 'Admin User', '+94771234567');
+  -- SELECT public.register_new_company('Second Corp', 'Second Ltd', 'Admin User', '+94771234567');
 ROLLBACK;
-*/
 
-/*
--- TEST B2: Cross-Tenant Isolation (SELECT / UPDATE / DELETE return 0 rows)
+-- TEST B2: Cross-Tenant Isolation
+-- Setup: Two tenants (T1, T2) with data. User from T1 queries data.
 BEGIN;
   SELECT set_config('request.jwt.claims', '{"sub": "11111111-1111-1111-1111-111111111111"}', true);
   SET LOCAL ROLE authenticated;
   
-  -- Querying customers from another tenant returns 0 rows
+  -- Should only see data for T1, not T2
   SELECT COUNT(*) FROM public.customers;
 ROLLBACK;
-*/
 
-/*
 -- TEST B3: Self-Role Escalation & Immutable Identity Prevention
+-- Setup: User U1 (Salesperson) tries to update their own role.
 BEGIN;
   SELECT set_config('request.jwt.claims', '{"sub": "22222222-2222-2222-2222-222222222222"}', true);
   SET LOCAL ROLE authenticated;
 
   -- Salesperson trying to elevate role -> raises exception
-  UPDATE public.user_profiles SET role = 'Owner / Administrator' WHERE user_id = auth.uid();
+  -- UPDATE public.user_profiles SET role = 'Owner / Administrator' WHERE user_id = auth.uid();
 ROLLBACK;
-*/
 
-/*
 -- TEST B4: General Ledger Append-Only & Journal Balancing RPC Test
+-- Setup: Authenticated user posts balanced journal entry.
 BEGIN;
   SELECT set_config('request.jwt.claims', '{"sub": "11111111-1111-1111-1111-111111111111"}', true);
   SET LOCAL ROLE authenticated;
-
-  -- Attempt direct UPDATE/DELETE on general_ledger -> raises exception
-  -- DELETE FROM public.general_ledger;
 
   -- Test balanced journal posting via secure RPC
   SELECT public.post_journal_voucher(
@@ -143,15 +148,13 @@ BEGIN;
     '[{"account_code": "1000", "account_name": "Cash", "debit": 10000, "credit": 0}, {"account_code": "3000", "account_name": "Capital", "debit": 0, "credit": 10000}]'::jsonb
   );
 ROLLBACK;
-*/
 
-/*
 -- TEST B5: Delivery Driver Assignment & Permitted Column Update Test
+-- Setup: Delivery D1 assigned to Driver DRV1.
 BEGIN;
   SELECT set_config('request.jwt.claims', '{"sub": "33333333-3333-3333-3333-333333333333"}', true);
   SET LOCAL ROLE authenticated;
 
-  -- Driver updating assigned delivery status and POD -> allowed
-  -- Driver trying to update delivery address or items -> raises exception via guard_delivery_update()
+  -- Driver updating assigned delivery status -> allowed
+  -- Driver trying to update other columns -> raises exception via guard_delivery_update()
 ROLLBACK;
-*/

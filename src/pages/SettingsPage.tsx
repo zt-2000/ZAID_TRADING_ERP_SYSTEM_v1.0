@@ -217,7 +217,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
           <Lock className="w-4 h-4 shrink-0" />
           <span>
-            You are signed in as <strong>{currentUser.role}</strong>. Only authorized Administrators can modify company-wide identity and branding settings.
+            You are signed in as <strong>{currentUser?.role || 'Guest'}</strong>. Only authorized Administrators can modify company-wide identity and branding settings.
           </span>
         </div>
       )}
