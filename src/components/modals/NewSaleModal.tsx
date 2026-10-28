@@ -1,0 +1,255 @@
+import React, { useState } from 'react';
+import { Dialog } from '../ui/Dialog';
+import { Input } from '../ui/Input';
+import { Select } from '../ui/Select';
+import { Button } from '../ui/Button';
+import { useToast } from '../../context/ToastContext';
+import { Plus, Trash2 } from 'lucide-react';
+
+interface NewSaleModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  currencySymbol?: string;
+}
+
+interface SaleLineItem {
+  id: string;
+  itemDescription: string;
+  quantity: number;
+  unitPrice: number;
+  taxRate: number;
+}
+
+export const NewSaleModal: React.FC<NewSaleModalProps> = ({
+  isOpen,
+  onClose,
+  currencySymbol = '$',
+}) => {
+  const { showToast } = useToast();
+  const [customerName, setCustomerName] = useState('');
+  const [customerCode, setCustomerCode] = useState('');
+  const [paymentTerms, setPaymentTerms] = useState('30_days');
+  const [warehouse, setWarehouse] = useState('central_hub');
+  const [notes, setNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [items, setItems] = useState<SaleLineItem[]>([
+    { id: '1', itemDescription: '', quantity: 1, unitPrice: 0, taxRate: 15 },
+  ]);
+
+  const addItemRow = () => {
+    setItems((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 7),
+        itemDescription: '',
+        quantity: 1,
+        unitPrice: 0,
+        taxRate: 15,
+      },
+    ]);
+  };
+
+  const removeItemRow = (id: string) => {
+    if (items.length === 1) return;
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const updateItem = (id: string, field: keyof SaleLineItem, value: string | number) => {
+    setItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+    );
+  };
+
+  const subtotal = items.reduce((acc, curr) => acc + (curr.quantity * curr.unitPrice || 0), 0);
+  const taxTotal = items.reduce(
+    (acc, curr) => acc + ((curr.quantity * curr.unitPrice * curr.taxRate) / 100 || 0),
+    0
+  );
+  const totalAmount = subtotal + taxTotal;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customerName.trim()) {
+      showToast('Validation Error', 'Customer name is required', 'error');
+      return;
+    }
+    const hasInvalidItem = items.some((item) => !item.itemDescription.trim() || item.unitPrice <= 0);
+    if (hasInvalidItem) {
+      showToast('Validation Error', 'All line items must have a description and valid price', 'error');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setTimeout(() => {
+      setIsSubmitting(false);
+      showToast(
+        'Invoice Drafted',
+        `Sales invoice for ${customerName} (${currencySymbol}${totalAmount.toFixed(2)}) prepared for posting.`,
+        'success'
+      );
+      onClose();
+      // Reset form
+      setCustomerName('');
+      setCustomerCode('');
+      setItems([{ id: '1', itemDescription: '', quantity: 1, unitPrice: 0, taxRate: 15 }]);
+    }, 600);
+  };
+
+  return (
+    <Dialog
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Create Sales Invoice"
+      description="Draft wholesale commercial invoice with tax calculations and delivery location"
+      maxWidth="2xl"
+      footer={
+        <>
+          <Button variant="outline" size="sm" onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" onClick={handleSubmit} isLoading={isSubmitting}>
+            Post & Save Invoice
+          </Button>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Input
+            label="Customer Name"
+            placeholder="e.g. Al-Madina Wholesale Supermarket"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            required
+          />
+          <Input
+            label="Customer Account / Tax Code"
+            placeholder="e.g. CUST-8491"
+            value={customerCode}
+            onChange={(e) => setCustomerCode(e.target.value)}
+            optional
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Select
+            label="Payment Terms"
+            value={paymentTerms}
+            onChange={(e) => setPaymentTerms(e.target.value)}
+            options={[
+              { value: 'immediate', label: 'Cash on Delivery (Immediate)' },
+              { value: '15_days', label: 'Net 15 Days' },
+              { value: '30_days', label: 'Net 30 Days' },
+              { value: '60_days', label: 'Net 60 Days' },
+            ]}
+          />
+          <Select
+            label="Dispatch Warehouse / Van Location"
+            value={warehouse}
+            onChange={(e) => setWarehouse(e.target.value)}
+            options={[
+              { value: 'central_hub', label: 'Main Central Hub (Riyadh)' },
+              { value: 'van_01', label: 'Van Unit 01 - North Route' },
+              { value: 'van_02', label: 'Van Unit 02 - South Route' },
+            ]}
+          />
+        </div>
+
+        <div className="pt-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700 dark:text-neutral-300">
+              Line Items
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addItemRow}
+              leftIcon={<Plus className="w-3.5 h-3.5" />}
+            >
+              Add Item
+            </Button>
+          </div>
+
+          <div className="space-y-2 border border-slate-200 dark:border-neutral-800 rounded-lg p-3 bg-slate-50/50 dark:bg-[#151b18]">
+            {items.map((item, index) => (
+              <div key={item.id} className="flex items-center gap-2 text-xs">
+                <div className="w-6 text-slate-400 text-center font-mono">{index + 1}</div>
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    placeholder="Product description or SKU"
+                    value={item.itemDescription}
+                    onChange={(e) => updateItem(item.id, 'itemDescription', e.target.value)}
+                    className="w-full bg-white dark:bg-[#1a211e] border border-slate-200 dark:border-neutral-700 rounded px-2.5 py-1.5 text-xs text-slate-900 dark:text-neutral-100 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-[#167a53]"
+                  />
+                </div>
+                <div className="w-20">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Qty"
+                    value={item.quantity}
+                    onChange={(e) => updateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
+                    className="w-full bg-white dark:bg-[#1a211e] border border-slate-200 dark:border-neutral-700 rounded px-2.5 py-1.5 text-xs text-slate-900 dark:text-neutral-100 text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-[#167a53]"
+                  />
+                </div>
+                <div className="w-24">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Price"
+                    value={item.unitPrice || ''}
+                    onChange={(e) => updateItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
+                    className="w-full bg-white dark:bg-[#1a211e] border border-slate-200 dark:border-neutral-700 rounded px-2.5 py-1.5 text-xs text-slate-900 dark:text-neutral-100 text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-[#167a53]"
+                  />
+                </div>
+                <div className="w-24 text-right font-mono tabular-nums font-medium text-slate-700 dark:text-neutral-300">
+                  {currencySymbol}
+                  {(item.quantity * item.unitPrice).toFixed(2)}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeItemRow(item.id)}
+                  disabled={items.length === 1}
+                  className="text-slate-400 hover:text-rose-500 disabled:opacity-30 p-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 flex justify-end">
+            <div className="w-64 space-y-1.5 text-xs">
+              <div className="flex justify-between text-slate-500 dark:text-neutral-400">
+                <span>Subtotal:</span>
+                <span className="font-mono tabular-nums">{currencySymbol}{subtotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-slate-500 dark:text-neutral-400">
+                <span>Estimated Tax (15%):</span>
+                <span className="font-mono tabular-nums">{currencySymbol}{taxTotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm font-semibold text-slate-900 dark:text-neutral-100 pt-1.5 border-t border-slate-200 dark:border-neutral-700">
+                <span>Total Due:</span>
+                <span className="font-mono tabular-nums text-[#167a53] dark:text-[#34d399] font-bold">
+                  {currencySymbol}{totalAmount.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Input
+          label="Internal Notes / Shipping Instructions"
+          placeholder="e.g. Deliver before 10 AM, gate 3 unloading bay"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          optional
+        />
+      </form>
+    </Dialog>
+  );
+};

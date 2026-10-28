@@ -1,0 +1,6 @@
+{
+  "name": "Zaid Trading ERP",
+  "description": "Enterprise Wholesale Trading ERP System for Zaid Trading - Multi-currency, Inventory, Sales, Purchasing, Delivery & Van Sales, Finance & Reconciliation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
