@@ -1,88 +1,28 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserProfile, UserPreferences, UserSession } from '../types';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface UserContextType {
-  currentUser: UserProfile;
-  updateCurrentUser: (updates: Partial<UserProfile>) => { success: boolean; message?: string };
+  currentUser: UserProfile | null;
+  loading: boolean;
+  signIn: (email: string, pass: string) => Promise<{ success: boolean; message: string }>;
+  signUp: (email: string, pass: string, companyName: string, legalName: string, fullName: string, phone?: string) => Promise<{ success: boolean; message: string }>;
+  signOut: () => Promise<void>;
+  updateCurrentUser: (updates: Partial<UserProfile>) => Promise<{ success: boolean; message?: string }>;
   preferences: UserPreferences;
   updatePreferences: (updates: Partial<UserPreferences>) => void;
   users: UserProfile[];
-  inviteUser: (data: Omit<UserProfile, 'id' | 'createdAt'>) => { success: boolean; message: string };
-  updateUser: (id: string, updates: Partial<UserProfile>) => { success: boolean; message: string };
-  toggleUserStatus: (id: string) => { success: boolean; message: string };
-  deleteUser: (id: string) => { success: boolean; message: string };
+  inviteUser: (data: Omit<UserProfile, 'id' | 'createdAt'>) => Promise<{ success: boolean; message: string }>;
+  updateUser: (id: string, updates: Partial<UserProfile>) => Promise<{ success: boolean; message: string }>;
+  toggleUserStatus: (id: string) => Promise<{ success: boolean; message: string }>;
+  deleteUser: (id: string) => Promise<{ success: boolean; message: string }>;
   sessions: UserSession[];
   revokeSession: (id: string) => void;
   revokeAllOtherSessions: () => void;
   changePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
-  signOut: () => void;
   isSuperAdmin: boolean;
+  authError: string | null;
 }
-
-const defaultUser: UserProfile = {
-  id: 'usr_zaid_01',
-  name: 'Rashid Al-Zaid',
-  displayName: 'Rashid Al-Zaid',
-  email: 'zaidtrading.info@gmail.com',
-  phone: '+94 77 123 4567',
-  jobTitle: 'Managing Director & Head of Operations',
-  role: 'Owner / Administrator',
-  avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80',
-  preferredLanguage: 'English (UK)',
-  createdAt: '2024-01-15T08:00:00.000Z',
-  status: 'active',
-  assignedWarehouse: 'Colombo Central Distribution Hub',
-  lastActive: 'Active Now',
-};
-
-const defaultUsersList: UserProfile[] = [
-  defaultUser,
-  {
-    id: 'usr_zaid_02',
-    name: 'Tariq Mansoor',
-    displayName: 'Tariq M.',
-    email: 'tariq.m@zaidtrading.com',
-    phone: '+94 71 890 1234',
-    jobTitle: 'Senior Warehouse Lead',
-    role: 'Storekeeper',
-    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80',
-    preferredLanguage: 'English',
-    createdAt: '2024-03-10T10:30:00.000Z',
-    status: 'active',
-    assignedWarehouse: 'Colombo Central Distribution Hub',
-    lastActive: '2 hours ago',
-  },
-  {
-    id: 'usr_zaid_03',
-    name: 'Fahad Al-Harbi',
-    displayName: 'Fahad H.',
-    email: 'fahad.h@zaidtrading.com',
-    phone: '+94 76 543 2109',
-    jobTitle: 'Field Dispatch Specialist',
-    role: 'Delivery Driver',
-    avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80',
-    preferredLanguage: 'English',
-    createdAt: '2024-04-01T09:15:00.000Z',
-    status: 'active',
-    assignedWarehouse: 'Van Fleet Unit 01 (Western Province)',
-    lastActive: '34 minutes ago',
-  },
-  {
-    id: 'usr_zaid_04',
-    name: 'Sarah Nabil',
-    displayName: 'Sarah N.',
-    email: 'sarah.n@zaidtrading.com',
-    phone: '+94 77 987 6543',
-    jobTitle: 'Chief Financial Accountant',
-    role: 'Accountant',
-    avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80',
-    preferredLanguage: 'English',
-    createdAt: '2024-02-20T14:00:00.000Z',
-    status: 'active',
-    assignedWarehouse: 'Corporate Head Office',
-    lastActive: '1 day ago',
-  },
-];
 
 const defaultPreferences: UserPreferences = {
   theme: 'light',
@@ -94,270 +34,334 @@ const defaultPreferences: UserPreferences = {
   marketingEmails: false,
 };
 
-const initialSessions: UserSession[] = [
-  {
-    id: 'sess_cur_01',
-    device: 'Desktop Mac Studio (Apple M2 Ultra)',
-    browser: 'Chrome 122.0.0.0 (WebKit)',
-    ipAddress: '123.231.104.22',
-    location: 'Colombo, Western Province, Sri Lanka',
-    lastActive: 'Active Now (Current Session)',
-    isCurrent: true,
-  },
-  {
-    id: 'sess_mob_02',
-    device: 'iPhone 15 Pro Max (iOS 17.4)',
-    browser: 'Mobile Safari',
-    ipAddress: '123.231.104.45',
-    location: 'Colombo, Western Province, Sri Lanka',
-    lastActive: 'Today at 07:42 AM',
-    isCurrent: false,
-  },
-  {
-    id: 'sess_lap_03',
-    device: 'Lenovo ThinkPad X1 Carbon (Windows 11)',
-    browser: 'Edge 121.0.0.0',
-    ipAddress: '112.134.198.14',
-    location: 'Kandy Logistics Office, Sri Lanka',
-    lastActive: '3 days ago',
-    isCurrent: false,
-  },
-];
-
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('zaid_erp_current_user');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return defaultUser;
-      }
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [preferences, setPreferences] = useState<UserPreferences>(defaultPreferences);
+  const [sessions, setSessions] = useState<UserSession[]>([
+    {
+      id: 'sess_cur_01',
+      device: 'Desktop Browser',
+      browser: navigator.userAgent,
+      ipAddress: 'Local Network',
+      location: 'Colombo, Sri Lanka',
+      lastActive: 'Active Now',
+      isCurrent: true,
     }
-    return defaultUser;
-  });
-
-  const [users, setUsers] = useState<UserProfile[]>(() => {
-    const saved = localStorage.getItem('zaid_erp_users_list');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return defaultUsersList;
-      }
-    }
-    return defaultUsersList;
-  });
-
-  const [preferences, setPreferences] = useState<UserPreferences>(() => {
-    const saved = localStorage.getItem('zaid_erp_user_preferences');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return defaultPreferences;
-      }
-    }
-    return defaultPreferences;
-  });
-
-  const [sessions, setSessions] = useState<UserSession[]>(() => {
-    const saved = localStorage.getItem('zaid_erp_user_sessions');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return initialSessions;
-      }
-    }
-    return initialSessions;
-  });
+  ]);
 
   useEffect(() => {
-    localStorage.setItem('zaid_erp_current_user', JSON.stringify(currentUser));
-  }, [currentUser]);
+    let mounted = true;
 
-  useEffect(() => {
-    localStorage.setItem('zaid_erp_users_list', JSON.stringify(users));
-  }, [users]);
+    async function loadSessionAndProfile() {
+      if (!isSupabaseConfigured() || !supabase) {
+        if (mounted) {
+          setLoading(false);
+          setAuthError('Supabase is not configured. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in environment variables.');
+        }
+        return;
+      }
 
-  useEffect(() => {
-    localStorage.setItem('zaid_erp_user_preferences', JSON.stringify(preferences));
-  }, [preferences]);
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
 
-  useEffect(() => {
-    localStorage.setItem('zaid_erp_user_sessions', JSON.stringify(sessions));
-  }, [sessions]);
+        if (session?.user) {
+          // Fetch user profile from database
+          const { data: profile, error: profileError } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('user_id', session.user.id)
+            .single();
 
-  const isSuperAdmin = currentUser.role === 'Owner / Administrator';
+          if (profileError || !profile) {
+            if (mounted) {
+              setCurrentUser(null);
+              setAuthError('User authenticated in Supabase Auth, but no ERP profile found. Please complete company registration.');
+            }
+          } else if (profile.status !== 'active') {
+            if (mounted) {
+              setCurrentUser(null);
+              setAuthError('Your user account has been deactivated by the company administrator.');
+              await supabase.auth.signOut();
+            }
+          } else {
+            if (mounted) {
+              setCurrentUser({
+                id: profile.id,
+                name: profile.name,
+                displayName: profile.display_name || profile.name,
+                email: profile.email,
+                phone: profile.phone || '',
+                jobTitle: profile.job_title || '',
+                role: profile.role,
+                status: profile.status,
+                assignedWarehouse: profile.assigned_warehouse || '',
+                createdAt: profile.created_at,
+              });
+              setAuthError(null);
+              
+              // Load company users list if admin/manager
+              if (profile.role === 'Owner / Administrator' || profile.role === 'Manager') {
+                const { data: companyUsers } = await supabase
+                  .from('user_profiles')
+                  .select('*')
+                  .eq('company_id', profile.company_id);
+                if (companyUsers) {
+                  setUsers(companyUsers.map((u: any) => ({
+                    id: u.id,
+                    name: u.name,
+                    displayName: u.display_name || u.name,
+                    email: u.email,
+                    phone: u.phone || '',
+                    jobTitle: u.job_title || '',
+                    role: u.role,
+                    status: u.status,
+                    assignedWarehouse: u.assigned_warehouse || '',
+                    createdAt: u.created_at,
+                  })));
+                }
+              }
+            }
+          }
+        } else {
+          if (mounted) {
+            setCurrentUser(null);
+          }
+        }
+      } catch (err: any) {
+        if (mounted) {
+          setAuthError(err.message || 'Failed to initialize session.');
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
 
-  const updateCurrentUser = (updates: Partial<UserProfile>) => {
-    // Protected fields that cannot be altered from user profile
-    const safeUpdates = { ...updates };
-    delete safeUpdates.role;
-    delete safeUpdates.status;
-    delete safeUpdates.id;
-    delete safeUpdates.createdAt;
+    loadSessionAndProfile();
 
-    const updated = { ...currentUser, ...safeUpdates };
-    setCurrentUser(updated);
+    if (supabase) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_IN' && session?.user) {
+          await loadSessionAndProfile();
+        } else if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+          setUsers([]);
+        }
+      });
 
-    // Also update in users list
-    setUsers((prev) => prev.map((u) => (u.id === currentUser.id ? { ...u, ...safeUpdates } : u)));
-    return { success: true };
+      return () => {
+        subscription.unsubscribe();
+        mounted = false;
+      };
+    }
+  }, []);
+
+  const signIn = async (email: string, pass: string): Promise<{ success: boolean; message: string }> => {
+    if (!supabase) return { success: false, message: 'Supabase client not initialized.' };
+    setAuthError(null);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      if (error) return { success: false, message: error.message };
+
+      if (data.user) {
+        const { data: profile, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', data.user.id)
+          .single();
+
+        if (profileError || !profile) {
+          await supabase.auth.signOut();
+          return { success: false, message: 'Authenticated successfully, but no ERP profile exists. Please sign up or complete registration.' };
+        }
+
+        if (profile.status !== 'active') {
+          await supabase.auth.signOut();
+          return { success: false, message: 'Account is deactivated.' };
+        }
+
+        setCurrentUser({
+          id: profile.id,
+          name: profile.name,
+          displayName: profile.display_name || profile.name,
+          email: profile.email,
+          phone: profile.phone || '',
+          jobTitle: profile.job_title || '',
+          role: profile.role,
+          status: profile.status,
+          assignedWarehouse: profile.assigned_warehouse || '',
+          createdAt: profile.created_at,
+        });
+        return { success: true, message: 'Signed in successfully.' };
+      }
+      return { success: false, message: 'Sign in failed.' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Sign in error.' };
+    }
+  };
+
+  const signUp = async (
+    email: string, 
+    pass: string, 
+    companyName: string, 
+    legalName: string, 
+    fullName: string, 
+    phone?: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!supabase) return { success: false, message: 'Supabase client not initialized.' };
+    try {
+      // 1. Sign up with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({ email, password: pass });
+      if (authError) return { success: false, message: authError.message };
+
+      if (!authData.user) return { success: false, message: 'Registration failed in Auth.' };
+
+      // 2. Call secure onboarding RPC to create company and initial Owner profile atomically
+      const { data: companyId, error: rpcError } = await supabase.rpc('register_new_company', {
+        p_company_name: companyName,
+        p_legal_name: legalName,
+        p_name: fullName,
+        p_phone: phone || null,
+      });
+
+      if (rpcError) {
+        return { success: false, message: `Company registration error: ${rpcError.message}` };
+      }
+
+      return { success: true, message: 'Company and administrator account created successfully.' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Sign up error.' };
+    }
+  };
+
+  const signOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setCurrentUser(null);
+    setUsers([]);
+  };
+
+  const updateCurrentUser = async (updates: Partial<UserProfile>): Promise<{ success: boolean; message?: string }> => {
+    if (!currentUser || !supabase) return { success: false, message: 'Not authenticated' };
+    const safeUpdates: any = {};
+    if (updates.name) safeUpdates.name = updates.name;
+    if (updates.displayName) safeUpdates.display_name = updates.displayName;
+    if (updates.phone) safeUpdates.phone = updates.phone;
+    if (updates.jobTitle) safeUpdates.job_title = updates.jobTitle;
+    if (updates.assignedWarehouse) safeUpdates.assigned_warehouse = updates.assignedWarehouse;
+
+    const { error } = await supabase
+      .from('user_profiles')
+      .update(safeUpdates)
+      .eq('id', currentUser.id);
+
+    if (error) return { success: false, message: error.message };
+
+    setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
+    return { success: true, message: 'Profile updated successfully.' };
   };
 
   const updatePreferences = (updates: Partial<UserPreferences>) => {
-    setPreferences((prev) => ({ ...prev, ...updates }));
+    setPreferences(prev => ({ ...prev, ...updates }));
   };
 
-  const inviteUser = (data: Omit<UserProfile, 'id' | 'createdAt'>) => {
-    if (!isSuperAdmin) {
-      return { success: false, message: 'Unauthorized: Only administrators can invite new team members.' };
-    }
+  const inviteUser = async (data: Omit<UserProfile, 'id' | 'createdAt'>): Promise<{ success: boolean; message: string }> => {
+    if (!currentUser || !supabase) return { success: false, message: 'Not authenticated' };
+    if (currentUser.role !== 'Owner / Administrator') return { success: false, message: 'Permission denied: Only Owner / Administrator can invite users.' };
 
-    const emailTrimmed = data.email.trim().toLowerCase();
-    const existing = users.find((u) => u.email.toLowerCase() === emailTrimmed);
-    if (existing) {
-      return { success: false, message: `A user with email ${emailTrimmed} already exists in the system.` };
-    }
+    const { data: companyIdResult } = await supabase
+      .from('user_profiles')
+      .select('company_id')
+      .eq('id', currentUser.id)
+      .single();
 
-    const newUser: UserProfile = {
-      ...data,
-      id: `usr_zaid_${Date.now().toString(36)}`,
-      createdAt: new Date().toISOString(),
-      displayName: data.displayName || data.name.split(' ')[0],
-      status: 'active',
-      lastActive: 'Invited (Pending login)',
-    };
+    if (!companyIdResult) return { success: false, message: 'Company context not found.' };
 
-    setUsers((prev) => [newUser, ...prev]);
-    return { success: true, message: `Invitation successfully sent to ${emailTrimmed}.` };
+    const { error } = await supabase
+      .from('user_profiles')
+      .insert({
+        company_id: companyIdResult.company_id,
+        name: data.name,
+        display_name: data.displayName || data.name,
+        email: data.email,
+        phone: data.phone,
+        job_title: data.jobTitle,
+        role: data.role,
+        assigned_warehouse: data.assignedWarehouse,
+        status: data.status || 'active',
+      });
+
+    if (error) return { success: false, message: error.message };
+    return { success: true, message: 'User invited successfully.' };
   };
 
-  const updateUser = (id: string, updates: Partial<UserProfile>) => {
-    if (!isSuperAdmin && currentUser.id !== id) {
-      return { success: false, message: 'Unauthorized: You do not have permission to modify this account.' };
-    }
+  const updateUser = async (id: string, updates: Partial<UserProfile>): Promise<{ success: boolean; message: string }> => {
+    if (!supabase) return { success: false, message: 'Supabase not configured' };
+    const safeUpdates: any = {};
+    if (updates.name) safeUpdates.name = updates.name;
+    if (updates.displayName) safeUpdates.display_name = updates.displayName;
+    if (updates.phone) safeUpdates.phone = updates.phone;
+    if (updates.jobTitle) safeUpdates.job_title = updates.jobTitle;
+    if (updates.role) safeUpdates.role = updates.role;
+    if (updates.assignedWarehouse) safeUpdates.assigned_warehouse = updates.assignedWarehouse;
+    if (updates.status) safeUpdates.status = updates.status;
 
-    // Safety: prevent removing the last administrator
-    if (updates.role && updates.role !== 'Owner / Administrator') {
-      const adminCount = users.filter((u) => u.role === 'Owner / Administrator' && u.status === 'active').length;
-      const targetUser = users.find((u) => u.id === id);
-      if (targetUser?.role === 'Owner / Administrator' && adminCount <= 1) {
-        return {
-          success: false,
-          message: 'Security Constraint: Cannot revoke the last active Administrator role in the enterprise.',
-        };
-      }
-    }
+    const { error } = await supabase
+      .from('user_profiles')
+      .update(safeUpdates)
+      .eq('id', id);
 
-    setUsers((prev) =>
-      prev.map((u) => {
-        if (u.id === id) {
-          const updated = { ...u, ...updates };
-          if (id === currentUser.id) {
-            setCurrentUser(updated);
-          }
-          return updated;
-        }
-        return u;
-      })
-    );
-    return { success: true, message: 'User record updated successfully.' };
+    if (error) return { success: false, message: error.message };
+    return { success: true, message: 'User updated successfully.' };
   };
 
-  const toggleUserStatus = (id: string) => {
-    if (!isSuperAdmin) {
-      return { success: false, message: 'Unauthorized: Only administrators can modify account status.' };
-    }
-
-    const targetUser = users.find((u) => u.id === id);
-    if (!targetUser) return { success: false, message: 'User not found.' };
-
-    // Prevent deactivating oneself if last admin
-    if (targetUser.id === currentUser.id) {
-      const adminCount = users.filter((u) => u.role === 'Owner / Administrator' && u.status === 'active').length;
-      if (adminCount <= 1) {
-        return {
-          success: false,
-          message: 'Security Constraint: You cannot deactivate your own account as the sole enterprise Administrator.',
-        };
-      }
-    }
-
-    const newStatus: 'active' | 'inactive' = targetUser.status === 'active' ? 'inactive' : 'active';
-    setUsers((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, status: newStatus } : u))
-    );
-
-    if (id === currentUser.id) {
-      setCurrentUser((prev) => ({ ...prev, status: newStatus }));
-    }
-
-    return {
-      success: true,
-      message: `Account for ${targetUser.name} has been ${newStatus === 'active' ? 'reactivated' : 'deactivated'}.`,
-    };
+  const toggleUserStatus = async (id: string): Promise<{ success: boolean; message: string }> => {
+    const target = users.find(u => u.id === id);
+    if (!target) return { success: false, message: 'User not found.' };
+    const newStatus = target.status === 'active' ? 'inactive' : 'active';
+    return updateUser(id, { status: newStatus });
   };
 
-  const deleteUser = (id: string) => {
-    if (!isSuperAdmin) {
-      return { success: false, message: 'Unauthorized: Only administrators can delete team accounts.' };
-    }
-
-    if (id === currentUser.id) {
-      return { success: false, message: 'Security Constraint: You cannot delete your own active administrator account.' };
-    }
-
-    const targetUser = users.find((u) => u.id === id);
-    if (!targetUser) return { success: false, message: 'User not found.' };
-
-    setUsers((prev) => prev.filter((u) => u.id !== id));
-    return { success: true, message: `User ${targetUser.name} has been removed from the company directory.` };
+  const deleteUser = async (id: string): Promise<{ success: boolean; message: string }> => {
+    if (!supabase) return { success: false, message: 'Supabase not configured' };
+    const { error } = await supabase.from('user_profiles').delete().eq('id', id);
+    if (error) return { success: false, message: error.message };
+    return { success: true, message: 'User removed successfully.' };
   };
 
   const revokeSession = (id: string) => {
-    setSessions((prev) => prev.filter((s) => s.id !== id || s.isCurrent));
+    setSessions(prev => prev.filter(s => s.id !== id));
   };
 
   const revokeAllOtherSessions = () => {
-    setSessions((prev) => prev.filter((s) => s.isCurrent));
+    setSessions(prev => prev.filter(s => s.isCurrent));
   };
 
-  const changePassword = async (
-    currentPass: string,
-    newPass: string
-  ): Promise<{ success: boolean; message: string }> => {
-    // Simulate real auth handshake
-    await new Promise((resolve) => setTimeout(resolve, 600));
-
-    if (!currentPass || currentPass.length < 4) {
-      return { success: false, message: 'The current password provided is incorrect.' };
-    }
-
-    if (!newPass || newPass.length < 8) {
-      return { success: false, message: 'New password must be at least 8 characters long.' };
-    }
-
-    // Record security log entry
-    return {
-      success: true,
-      message: 'Password successfully updated. Security credential tokens refreshed.',
-    };
+  const changePassword = async (currentPass: string, newPass: string): Promise<{ success: boolean; message: string }> => {
+    if (!supabase) return { success: false, message: 'Supabase not configured' };
+    const { error } = await supabase.auth.updateUser({ password: newPass });
+    if (error) return { success: false, message: error.message };
+    return { success: true, message: 'Password updated successfully.' };
   };
 
-  const signOut = () => {
-    // Clear active sessions except template
-    setSessions([initialSessions[0]]);
-  };
+  const isSuperAdmin = currentUser?.role === 'Owner / Administrator';
 
   return (
     <UserContext.Provider
       value={{
         currentUser,
+        loading,
+        signIn,
+        signUp,
+        signOut,
         updateCurrentUser,
         preferences,
         updatePreferences,
@@ -370,8 +374,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         revokeSession,
         revokeAllOtherSessions,
         changePassword,
-        signOut,
         isSuperAdmin,
+        authError,
       }}
     >
       {children}

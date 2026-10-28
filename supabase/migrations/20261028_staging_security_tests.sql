@@ -1,8 +1,8 @@
 -- =========================================================================
--- ZAID TRADING ERP — EXECUTABLE STAGING SECURITY & RLS TEST SUITE (v4.5)
+-- ZAID TRADING ERP — EXECUTABLE STAGING SECURITY & RLS TEST SUITE (v4.6)
 -- Description: Two-part test suite. Part A validates structural database 
 -- configuration (RLS, privileges, triggers, constraints, SECURITY DEFINER).
--- Part B provides runnable authenticated RLS tests across seeded companies.
+-- Part B provides runnable authenticated RLS test templates using real UUID fixtures.
 -- =========================================================================
 
 -- =========================================================================

@@ -1,6 +1,6 @@
--- ZAID TRADING ERP — PRODUCTION SUPABASE SCHEMA MIGRATION (STAGING HARDENED v4.5)
--- Migration Version: 20261028_zaid_erp_hardened_schema_v4_5.sql
--- Description: Fully secured relational schema featuring strict tenant isolation, role-based matrix RLS policies, secure server-side journal posting RPC with debit/credit balance validation, delivery driver update restrictions (via trigger guard & RPC), append-only general ledger trigger, and complete anon lockout.
+-- ZAID TRADING ERP — PRODUCTION SUPABASE SCHEMA MIGRATION (STAGING HARDENED v4.6)
+-- Migration Version: 20261028_zaid_erp_hardened_schema_v4_6.sql
+-- Description: Fully secured relational schema featuring strict tenant isolation, role-based matrix RLS policies, secure server-side journal posting RPC with debit/credit balance validation, strict delivery driver update restrictions (explicit allowed fields & status transitions), append-only general ledger trigger, and complete anon lockout.
 -- IMPORTANT: THIS MIGRATION IS FOR A FRESH DATABASE ONLY. Upgrading an existing v4.x schema requires separate ALTER statements.
 
 -- =========================================================================
@@ -12,7 +12,7 @@
   - Salesperson: Read products and customers. Write quotations, sales_orders, sales_invoices, customers. No access to suppliers, purchases, grns, expenses, or general_ledger.
   - Storekeeper: Read/write products, warehouses, warehouse_bins, grns. Read purchases and sales_orders. No finance tables.
   - Accountant: Read everything. Write general_ledger (via secure RPC only), expenses, expense_categories.
-  - Delivery Driver: Read deliveries assigned to their profile name. UPDATE specific allowed delivery fields only (via trigger guard).
+  - Delivery Driver: Read deliveries assigned to their profile name. UPDATE specific allowed delivery fields only (status, recipient_name, proof_of_delivery_ref, notes, actual_delivery_date, history) via trigger guard.
 */
 
 -- =========================================================================
@@ -292,7 +292,7 @@ CREATE TABLE IF NOT EXISTS public.deliveries (
   actual_delivery_date TIMESTAMPTZ,
   assigned_staff TEXT,
   vehicle_details TEXT,
-  status TEXT DEFAULT 'scheduled' CHECK (status IN ('Pending', 'Scheduled', 'Preparing', 'Dispatched', 'In Transit', 'Delivered', 'Failed', 'Cancelled', 'scheduled', 'delivered')),
+  status TEXT DEFAULT 'Scheduled' CHECK (status IN ('Pending', 'Scheduled', 'Preparing', 'Dispatched', 'In Transit', 'Delivered', 'Failed', 'Cancelled')),
   items JSONB NOT NULL DEFAULT '[]'::jsonb,
   recipient_name TEXT,
   proof_of_delivery_ref TEXT,
@@ -525,7 +525,7 @@ REVOKE ALL ON FUNCTION public.guard_profile_update() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.guard_profile_update() TO authenticated, service_role;
 
 -- =========================================================================
--- DELIVERY DRIVER UPDATE GUARD TRIGGER (Restricts Driver column updates & transitions)
+-- DELIVERY DRIVER UPDATE GUARD TRIGGER (Restricts Driver column updates & allowed transitions)
 -- =========================================================================
 CREATE OR REPLACE FUNCTION public.guard_delivery_update()
 RETURNS TRIGGER AS $$
@@ -544,13 +544,15 @@ BEGIN
 
   -- If user is a Delivery Driver
   IF v_role = 'Delivery Driver' THEN
-    -- Ensure delivery is assigned to this driver
+    -- Ensure delivery is explicitly assigned to this driver's name
     IF OLD.assigned_staff IS DISTINCT FROM v_driver_name THEN
       RAISE EXCEPTION 'Unauthorized: Delivery is not assigned to this driver.';
     END IF;
 
-    -- Drivers cannot change core delivery metadata (customer, address, items, order ref, etc.)
+    -- Explicitly define allowed driver-editable fields: status, recipient_name, proof_of_delivery_ref, notes, actual_delivery_date, history.
+    -- All other columns must remain identical to OLD.
     IF NEW.company_id IS DISTINCT FROM OLD.company_id
+       OR NEW.id IS DISTINCT FROM OLD.id
        OR NEW.delivery_number IS DISTINCT FROM OLD.delivery_number
        OR NEW.sales_order_id IS DISTINCT FROM OLD.sales_order_id
        OR NEW.sales_order_number IS DISTINCT FROM OLD.sales_order_number
@@ -560,13 +562,14 @@ BEGIN
        OR NEW.delivery_address IS DISTINCT FROM OLD.delivery_address
        OR NEW.scheduled_date IS DISTINCT FROM OLD.scheduled_date
        OR NEW.assigned_staff IS DISTINCT FROM OLD.assigned_staff
+       OR NEW.vehicle_details IS DISTINCT FROM OLD.vehicle_details
        OR NEW.items IS DISTINCT FROM OLD.items THEN
-      RAISE EXCEPTION 'Unauthorized: Delivery Drivers can only update delivery status, recipient name, POD reference, notes, and history.';
+      RAISE EXCEPTION 'Unauthorized: Delivery Drivers can only update status, recipient name, proof of delivery reference, notes, actual delivery date, and history.';
     END IF;
 
-    -- Validate allowed status transitions
-    v_valid_statuses := ARRAY['Pending', 'Scheduled', 'Preparing', 'Dispatched', 'In Transit', 'Delivered', 'Failed', 'Cancelled', 'scheduled', 'delivered'];
-    IF NEW.status = ANY(v_valid_statuses) = false THEN
+    -- Enforce strict allowed status transitions
+    v_valid_statuses := ARRAY['Pending', 'Scheduled', 'Preparing', 'Dispatched', 'In Transit', 'Delivered', 'Failed', 'Cancelled'];
+    IF NOT (NEW.status = ANY(v_valid_statuses)) THEN
       RAISE EXCEPTION 'Invalid delivery status transition.';
     END IF;
   END IF;
@@ -643,6 +646,11 @@ BEGIN
     RAISE EXCEPTION 'Voucher must contain at least one line item.';
   END IF;
 
+  -- Prevent duplicate posting for the same company and voucher reference
+  IF EXISTS (SELECT 1 FROM public.general_ledger WHERE company_id = v_company_id AND voucher_ref = p_voucher_ref) THEN
+    RAISE EXCEPTION 'Duplicate posting error: Voucher reference % already exists for this company.', p_voucher_ref;
+  END IF;
+
   -- Validate total debits equal total credits
   FOR v_line IN SELECT * FROM jsonb_array_elements(p_lines)
   LOOP
@@ -671,11 +679,11 @@ BEGIN
     v_line_debit := COALESCE((v_line->>'debit')::NUMERIC, 0);
     v_line_credit := COALESCE((v_line->>'credit')::NUMERIC, 0);
 
-    -- Get last running balance for this account in this company
+    -- Get last running balance for this account in this company (with row-level lock/isolation context)
     SELECT running_balance INTO v_last_balance
     FROM public.general_ledger
     WHERE company_id = v_company_id AND account_code = (v_line->>'account_code')
-    ORDER BY date DESC, created_at DESC LIMIT 1;
+    ORDER BY date DESC, created_at DESC LIMIT 1 FOR UPDATE;
 
     v_last_balance := COALESCE(v_last_balance, 0);
     v_new_balance := v_last_balance + v_line_debit - v_line_credit;
