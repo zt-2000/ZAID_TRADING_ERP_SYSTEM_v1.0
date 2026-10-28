@@ -1,6 +1,6 @@
--- ZAID TRADING ERP — PRODUCTION SUPABASE SCHEMA MIGRATION
--- Migration Version: 20261028_zaid_erp_initial_schema.sql
--- Description: Complete relational schema with RLS, foreign keys, indexes, and company data isolation.
+-- ZAID TRADING ERP — PRODUCTION SUPABASE SCHEMA MIGRATION (STAGING HARDENED)
+-- Migration Version: 20261028_zaid_erp_hardened_schema.sql
+-- Description: Complete relational schema with hardened RLS policies, WITH CHECK clauses, search_path security, and tenant isolation.
 
 -- 1. Companies Table
 CREATE TABLE IF NOT EXISTS public.companies (
@@ -335,13 +335,13 @@ ALTER TABLE public.grns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.general_ledger ENABLE ROW LEVEL SECURITY;
 
--- Dynamic RLS Policy Functions
+-- Secure SECURITY DEFINER Function with search_path set to public
 CREATE OR REPLACE FUNCTION public.get_auth_company_id()
 RETURNS UUID AS $$
   SELECT company_id FROM public.user_profiles WHERE user_id = auth.uid() LIMIT 1;
-$$ LANGUAGE sql STABLE SECURITY DEFINER;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
 
--- RLS Isolation Policies
+-- Hardened RLS Policies with explicit USING and WITH CHECK clauses
 DO $$
 DECLARE
   tbl TEXT;
@@ -350,9 +350,16 @@ BEGIN
     SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name NOT IN ('companies', 'user_profiles')
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS company_isolation_policy ON public.%I;', tbl);
-    EXECUTE format('CREATE POLICY company_isolation_policy ON public.%I FOR ALL USING (company_id = public.get_auth_company_id());', tbl);
+    EXECUTE format('CREATE POLICY company_isolation_policy ON public.%I FOR ALL USING (company_id = public.get_auth_company_id()) WITH CHECK (company_id = public.get_auth_company_id());', tbl);
   END LOOP;
 END $$;
+
+-- Companies and User Profiles policies
+DROP POLICY IF EXISTS companies_isolation_policy ON public.companies;
+CREATE POLICY companies_isolation_policy ON public.companies FOR SELECT USING (id = public.get_auth_company_id());
+
+DROP POLICY IF EXISTS user_profiles_isolation_policy ON public.user_profiles;
+CREATE POLICY user_profiles_isolation_policy ON public.user_profiles FOR ALL USING (company_id = public.get_auth_company_id()) WITH CHECK (company_id = public.get_auth_company_id());
 
 -- Indexes for Query Performance
 CREATE INDEX IF NOT EXISTS idx_products_sku ON public.products(company_id, sku);
