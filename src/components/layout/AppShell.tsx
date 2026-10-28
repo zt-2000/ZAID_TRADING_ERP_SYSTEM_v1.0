@@ -24,7 +24,7 @@ import { PurchasingPage } from '../../pages/PurchasingPage';
 import { InventoryPage } from '../../pages/InventoryPage';
 import { CustomersPage } from '../../pages/CustomersPage';
 import { SuppliersPage } from '../../pages/SuppliersPage';
-import { DeliveryVanSalesPage } from '../../pages/DeliveryVanSalesPage';
+import { DeliveryPage } from '../../pages/DeliveryPage';
 import { FinancePage } from '../../pages/FinancePage';
 import { ExpensesPage } from '../../pages/ExpensesPage';
 import { ReportsPage } from '../../pages/ReportsPage';
@@ -127,8 +127,8 @@ export const AppShell: React.FC<AppShellProps> = ({
         );
       case 'delivery':
         return (
-          <DeliveryVanSalesPage
-            currencySymbol={companySettings.currencySymbol}
+          <DeliveryPage
+            companySettings={companySettings}
           />
         );
       case 'finance':

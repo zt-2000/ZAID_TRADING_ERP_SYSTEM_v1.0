@@ -337,6 +337,57 @@ export interface WarehouseBinRecord {
   createdAt: string;
 }
 
+export type DeliveryStatus =
+  | 'pending'
+  | 'scheduled'
+  | 'preparing'
+  | 'dispatched'
+  | 'in_transit'
+  | 'delivered'
+  | 'failed'
+  | 'cancelled';
+
+export interface DeliveryLineItem {
+  id: string;
+  itemDescription: string;
+  orderedQty: number;
+  previouslyDeliveredQty: number;
+  deliveredQty: number;
+  outstandingQty: number;
+  unitPrice: number;
+}
+
+export interface DeliveryHistoryLog {
+  id: string;
+  status: DeliveryStatus;
+  timestamp: string;
+  updatedBy: string;
+  note: string;
+}
+
+export interface DeliveryRecord {
+  id: string;
+  deliveryNumber: string;
+  salesOrderId: string;
+  salesOrderNumber: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  deliveryAddress: string;
+  scheduledDate: string;
+  actualDeliveryDate?: string;
+  assignedStaff: string;
+  vehicleDetails?: string;
+  status: DeliveryStatus;
+  items: DeliveryLineItem[];
+  recipientName?: string;
+  proofOfDeliveryRef?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  history: DeliveryHistoryLog[];
+}
+
 export interface DeliveryShipmentRecord {
   id: string;
   shipmentNumber: string;
@@ -351,4 +402,5 @@ export interface DeliveryShipmentRecord {
   notes?: string;
   createdAt: string;
 }
+
 

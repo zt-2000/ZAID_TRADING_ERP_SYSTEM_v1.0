@@ -70,7 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'inventory', label: 'Inventory', icon: Layers },
         { id: 'customers', label: 'Customers', icon: Users },
         { id: 'suppliers', label: 'Suppliers', icon: Building2 },
-        { id: 'delivery', label: 'Delivery & Van Sales', icon: Truck },
+        { id: 'delivery', label: 'Delivery', icon: Truck },
       ],
     },
     {

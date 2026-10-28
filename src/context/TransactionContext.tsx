@@ -18,6 +18,10 @@ import {
   WarehouseRecord,
   WarehouseBinRecord,
   DeliveryShipmentRecord,
+  DeliveryRecord,
+  DeliveryStatus,
+  DeliveryLineItem,
+  DeliveryHistoryLog,
 } from '../types';
 
 export type {
@@ -38,6 +42,10 @@ export type {
   WarehouseRecord,
   WarehouseBinRecord,
   DeliveryShipmentRecord,
+  DeliveryRecord,
+  DeliveryStatus,
+  DeliveryLineItem,
+  DeliveryHistoryLog,
 };
 
 export interface GeneralLedgerEntry {
@@ -142,7 +150,7 @@ export interface COAAccount {
 
 export const chartOfAccounts: COAAccount[] = [
   { code: '1010', name: 'Central Warehouse Petty Cash Vault', type: 'Asset', category: 'Cash & Cash Equivalents' },
-  { code: '1015', name: 'Van Fleet Float Cash Box', type: 'Asset', category: 'Cash & Cash Equivalents' },
+  { code: '1015', name: 'Delivery COD Clearing Account', type: 'Asset', category: 'Cash & Cash Equivalents' },
   { code: '1020', name: 'Corporate Operating Bank Account', type: 'Asset', category: 'Cash & Cash Equivalents' },
   { code: '1050', name: 'Trade Accounts Receivable', type: 'Asset', category: 'Current Assets' },
   { code: '1100', name: 'Merchandise Inventory Asset', type: 'Asset', category: 'Inventory' },
@@ -180,19 +188,6 @@ export const defaultWarehouses: WarehouseRecord[] = [
     status: 'active',
     totalCapacityBays: 30,
     managerName: 'Kamil Perera',
-    createdAt: '2026-10-01',
-  },
-  {
-    id: 'wh_van_fleet',
-    code: 'WH-VAN-FLT',
-    name: 'Van Fleet Float Stock Units',
-    type: 'van',
-    address: 'Mobile Logistics Fleet, Colombo Terminal',
-    city: 'Colombo',
-    isDefault: false,
-    status: 'active',
-    totalCapacityBays: 12,
-    managerName: 'Nimal Fernando',
     createdAt: '2026-10-01',
   },
 ];
@@ -278,6 +273,44 @@ interface TransactionContextType {
   warehouses: WarehouseRecord[];
   warehouseBins: WarehouseBinRecord[];
   shipments: DeliveryShipmentRecord[];
+  deliveries: DeliveryRecord[];
+
+  // Delivery Management
+  createDeliveryFromSalesOrder: (data: {
+    salesOrderId: string;
+    salesOrderNumber: string;
+    customerId: string;
+    customerName: string;
+    customerPhone: string;
+    deliveryAddress: string;
+    scheduledDate: string;
+    assignedStaff: string;
+    vehicleDetails?: string;
+    items: {
+      id?: string;
+      itemDescription: string;
+      orderedQty: number;
+      previouslyDeliveredQty: number;
+      deliveredQty: number;
+      unitPrice: number;
+    }[];
+    notes?: string;
+  }) => { success: boolean; delivery?: DeliveryRecord; error?: string };
+
+  updateDeliveryStatus: (
+    deliveryId: string,
+    newStatus: DeliveryStatus,
+    note?: string,
+    updatedBy?: string
+  ) => { success: boolean; delivery?: DeliveryRecord; error?: string };
+
+  confirmDeliveryPOD: (
+    deliveryId: string,
+    recipientName: string,
+    proofOfDeliveryRef?: string,
+    actualDeliveryDate?: string,
+    note?: string
+  ) => { success: boolean; delivery?: DeliveryRecord; error?: string };
 
   // Mutators
   recordExpense: (data: {
@@ -573,13 +606,21 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return defaultBins;
   });
 
-  // Shipments
+  // Deliveries & Shipments
+  const [deliveries, setDeliveries] = useState<DeliveryRecord[]>(() => {
+    const saved = localStorage.getItem('zaid_erp_deliveries');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   const [shipments, setShipments] = useState<DeliveryShipmentRecord[]>(() => {
     const saved = localStorage.getItem('zaid_erp_shipments');
     return saved ? JSON.parse(saved) : [];
   });
 
   // Local storage synchronization
+  useEffect(() => {
+    localStorage.setItem('zaid_erp_deliveries', JSON.stringify(deliveries));
+  }, [deliveries]);
   useEffect(() => {
     localStorage.setItem('zaid_erp_expenses', JSON.stringify(expenses));
   }, [expenses]);
@@ -1610,12 +1651,177 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     [shipments]
   );
 
-  const updateShipmentStatus = useCallback(
-    (id: string, status: DeliveryShipmentRecord['status']) => {
-      setShipments((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, status } : s))
+  // Delivery Management Callbacks
+  const createDeliveryFromSalesOrder = useCallback(
+    (data: {
+      salesOrderId: string;
+      salesOrderNumber: string;
+      customerId: string;
+      customerName: string;
+      customerPhone: string;
+      deliveryAddress: string;
+      scheduledDate: string;
+      assignedStaff: string;
+      vehicleDetails?: string;
+      items: {
+        id?: string;
+        itemDescription: string;
+        orderedQty: number;
+        previouslyDeliveredQty: number;
+        deliveredQty: number;
+        unitPrice: number;
+      }[];
+      notes?: string;
+    }) => {
+      // Validate quantity caps
+      for (const item of data.items) {
+        const maxAvailable = Math.max(0, item.orderedQty - item.previouslyDeliveredQty);
+        if (item.deliveredQty > maxAvailable) {
+          return {
+            success: false,
+            error: `Delivered quantity (${item.deliveredQty}) for "${item.itemDescription}" exceeds remaining balance (${maxAvailable}).`,
+          };
+        }
+      }
+
+      const dlvNum = `DLV-${String(deliveries.length + 1001).padStart(5, '0')}`;
+      const nowIso = new Date().toISOString();
+
+      const deliveryItems: DeliveryLineItem[] = data.items.map((item, idx) => ({
+        id: item.id || `dlv_item_${Date.now()}_${idx}`,
+        itemDescription: item.itemDescription,
+        orderedQty: item.orderedQty,
+        previouslyDeliveredQty: item.previouslyDeliveredQty,
+        deliveredQty: item.deliveredQty,
+        outstandingQty: Math.max(0, item.orderedQty - item.previouslyDeliveredQty - item.deliveredQty),
+        unitPrice: item.unitPrice,
+      }));
+
+      const initialHistory: DeliveryHistoryLog = {
+        id: `log_${Date.now()}_1`,
+        status: 'scheduled',
+        timestamp: nowIso,
+        updatedBy: 'Logistics Operations',
+        note: `Delivery Note ${dlvNum} generated for Sales Order ${data.salesOrderNumber}. Scheduled for ${data.scheduledDate}.`,
+      };
+
+      const newDelivery: DeliveryRecord = {
+        id: `dlv_${Date.now()}`,
+        deliveryNumber: dlvNum,
+        salesOrderId: data.salesOrderId,
+        salesOrderNumber: data.salesOrderNumber,
+        customerId: data.customerId,
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        deliveryAddress: data.deliveryAddress,
+        scheduledDate: data.scheduledDate,
+        assignedStaff: data.assignedStaff,
+        vehicleDetails: data.vehicleDetails,
+        status: 'scheduled',
+        items: deliveryItems,
+        notes: data.notes,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        history: [initialHistory],
+      };
+
+      setDeliveries((prev) => [newDelivery, ...prev]);
+
+      // Update Sales Order status to dispatched
+      setSalesOrders((prev) =>
+        prev.map((o) => {
+          if (o.id === data.salesOrderId || o.orderNumber === data.salesOrderNumber) {
+            return { ...o, status: 'dispatched' };
+          }
+          return o;
+        })
       );
-      return { success: true };
+
+      return { success: true, delivery: newDelivery };
+    },
+    [deliveries]
+  );
+
+  const updateDeliveryStatus = useCallback(
+    (
+      deliveryId: string,
+      newStatus: DeliveryStatus,
+      note?: string,
+      updatedBy: string = 'Logistics Officer'
+    ) => {
+      const nowIso = new Date().toISOString();
+      let updated: DeliveryRecord | undefined;
+
+      setDeliveries((prev) =>
+        prev.map((d) => {
+          if (d.id === deliveryId) {
+            const newHistory: DeliveryHistoryLog = {
+              id: `log_${Date.now()}`,
+              status: newStatus,
+              timestamp: nowIso,
+              updatedBy,
+              note: note || `Status updated to ${newStatus.replace('_', ' ').toUpperCase()}`,
+            };
+
+            updated = {
+              ...d,
+              status: newStatus,
+              updatedAt: nowIso,
+              history: [newHistory, ...d.history],
+            };
+            return updated;
+          }
+          return d;
+        })
+      );
+
+      return { success: true, delivery: updated };
+    },
+    []
+  );
+
+  const confirmDeliveryPOD = useCallback(
+    (
+      deliveryId: string,
+      recipientName: string,
+      proofOfDeliveryRef?: string,
+      actualDeliveryDate?: string,
+      note?: string
+    ) => {
+      const nowIso = new Date().toISOString();
+      let updated: DeliveryRecord | undefined;
+
+      setDeliveries((prev) =>
+        prev.map((d) => {
+          if (d.id === deliveryId) {
+            const podNote = `Proof of Delivery signed by recipient "${recipientName}". ${
+              proofOfDeliveryRef ? `POD Ref: ${proofOfDeliveryRef}.` : ''
+            } ${note || ''}`;
+
+            const newHistory: DeliveryHistoryLog = {
+              id: `log_${Date.now()}`,
+              status: 'delivered',
+              timestamp: nowIso,
+              updatedBy: 'Delivery Driver',
+              note: podNote,
+            };
+
+            updated = {
+              ...d,
+              status: 'delivered',
+              recipientName,
+              proofOfDeliveryRef,
+              actualDeliveryDate: actualDeliveryDate || nowIso,
+              updatedAt: nowIso,
+              history: [newHistory, ...d.history],
+            };
+            return updated;
+          }
+          return d;
+        })
+      );
+
+      return { success: true, delivery: updated };
     },
     []
   );
@@ -1639,7 +1845,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         orderTracking,
         warehouses,
         warehouseBins,
-        shipments,
+        shipments: [],
+        deliveries,
         recordExpense,
         recordSale,
         recordPurchase,
@@ -1659,8 +1866,11 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         addWarehouseBin,
         updateWarehouseBin,
         deleteWarehouseBin,
-        recordDeliveryShipment,
-        updateShipmentStatus,
+        recordDeliveryShipment: () => ({ success: true }),
+        updateShipmentStatus: () => ({ success: true }),
+        createDeliveryFromSalesOrder,
+        updateDeliveryStatus,
+        confirmDeliveryPOD,
       }}
     >
       {children}

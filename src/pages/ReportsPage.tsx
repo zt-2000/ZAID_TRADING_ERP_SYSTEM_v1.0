@@ -58,11 +58,11 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       period: 'Monthly / Annual',
     },
     {
-      id: 'van_reconciliation',
-      title: 'Van Sales EOD Settlement',
+      id: 'delivery_performance',
+      title: 'Delivery & Dispatch Performance',
       category: 'logistics',
-      description: 'Daily driver reconciliation: loaded stock vs customer sales vs cash remitted.',
-      period: 'Daily Settlement',
+      description: 'Logistics performance summary: scheduled deliveries vs actual completion and POD sign-offs.',
+      period: 'Monthly / Custom',
     },
     {
       id: 'audit_trail',
@@ -123,7 +123,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           { id: 'sales', label: 'Sales & Receivables' },
           { id: 'inventory', label: 'Inventory & Stock' },
           { id: 'financial', label: 'Financial Statements' },
-          { id: 'logistics', label: 'Van & Delivery Fleet' },
+          { id: 'logistics', label: 'Delivery & Fleet Logistics' },
           { id: 'compliance', label: 'Audit & Compliance' },
         ].map((tab) => (
           <button
