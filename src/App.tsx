@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
+import { CategoryProvider } from './context/CategoryContext';
 import { AppShell } from './components/layout/AppShell';
 import { CompanySettings } from './types';
 
@@ -58,10 +59,12 @@ export default function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
-        <AppShell
-          companySettings={settings}
-          onUpdateSettings={handleUpdateSettings}
-        />
+        <CategoryProvider>
+          <AppShell
+            companySettings={settings}
+            onUpdateSettings={handleUpdateSettings}
+          />
+        </CategoryProvider>
       </ToastProvider>
     </ThemeProvider>
   );
