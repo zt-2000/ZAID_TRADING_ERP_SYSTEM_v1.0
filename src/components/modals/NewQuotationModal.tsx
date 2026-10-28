@@ -37,6 +37,8 @@ export const NewQuotationModal: React.FC<NewQuotationModalProps> = ({
   const [warehouse, setWarehouse] = useState(warehouses[0]?.name || 'Colombo Central Distribution Hub');
   const [notes, setNotes] = useState('');
   const [saveAsDraft, setSaveAsDraft] = useState(false);
+  const [applyVat, setApplyVat] = useState(false);
+  const [vatRate, setVatRate] = useState(15);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [items, setItems] = useState<QuotationLineItem[]>([
@@ -91,13 +93,11 @@ export const NewQuotationModal: React.FC<NewQuotationModalProps> = ({
         const qty = Number(updated.quantity) || 0;
         const price = Number(updated.unitPrice) || 0;
         const disc = Number(updated.discount) || 0;
-        const tax = Number(updated.taxRate) || 0;
 
         const base = qty * price;
         const discAmt = (base * disc) / 100;
         const taxable = base - discAmt;
-        const taxAmt = (taxable * tax) / 100;
-        updated.total = taxable + taxAmt;
+        updated.total = taxable;
         return updated;
       })
     );
@@ -113,14 +113,9 @@ export const NewQuotationModal: React.FC<NewQuotationModalProps> = ({
     return acc + (base * (Number(curr.discount) || 0)) / 100;
   }, 0);
 
-  const taxTotal = items.reduce((acc, curr) => {
-    const base = (Number(curr.quantity) || 0) * (Number(curr.unitPrice) || 0);
-    const discAmt = (base * (Number(curr.discount) || 0)) / 100;
-    const taxable = base - discAmt;
-    return acc + (taxable * (Number(curr.taxRate) || 0)) / 100;
-  }, 0);
-
-  const totalAmount = subtotal - discountTotal + taxTotal;
+  const netTaxable = subtotal - discountTotal;
+  const taxTotal = applyVat ? (netTaxable * (Number(vatRate) || 0)) / 100 : 0;
+  const totalAmount = netTaxable + taxTotal;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,6 +144,8 @@ export const NewQuotationModal: React.FC<NewQuotationModalProps> = ({
         items,
         subtotal,
         discountTotal,
+        applyVat,
+        vatRate,
         taxTotal,
         total: totalAmount,
         notes: notes.trim() || undefined,
@@ -377,7 +374,7 @@ export const NewQuotationModal: React.FC<NewQuotationModalProps> = ({
             />
           </div>
 
-          <div className="w-full sm:w-72 bg-slate-50 dark:bg-[#151b18] p-3 rounded-lg border border-slate-200 dark:border-neutral-800 space-y-1.5 text-xs">
+          <div className="w-full sm:w-72 bg-slate-50 dark:bg-[#151b18] p-3 rounded-lg border border-slate-200 dark:border-neutral-800 space-y-2 text-xs">
             <div className="flex justify-between text-slate-600 dark:text-neutral-400">
               <span>Gross Subtotal:</span>
               <span className="font-mono">{formatCurrency(subtotal, currencySymbol)}</span>
@@ -388,9 +385,38 @@ export const NewQuotationModal: React.FC<NewQuotationModalProps> = ({
                 <span className="font-mono">-{formatCurrency(discountTotal, currencySymbol)}</span>
               </div>
             )}
-            <div className="flex justify-between text-slate-600 dark:text-neutral-400">
-              <span>VAT / Tax (15%):</span>
-              <span className="font-mono">{formatCurrency(taxTotal, currencySymbol)}</span>
+            <div className="pt-1 border-t border-slate-200/60 dark:border-neutral-800">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-800 dark:text-neutral-200">
+                  <input
+                    type="checkbox"
+                    checked={applyVat}
+                    onChange={(e) => setApplyVat(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded text-[#167a53] focus:ring-[#167a53] cursor-pointer"
+                  />
+                  <span>Apply Output VAT</span>
+                </label>
+                {applyVat ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      value={vatRate}
+                      onChange={(e) => setVatRate(parseFloat(e.target.value) || 0)}
+                      className="w-12 px-1 py-0.5 text-right font-mono rounded border border-slate-300 dark:border-neutral-700 bg-white dark:bg-[#1a231e] text-slate-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-[#167a53]"
+                    />
+                    <span className="text-slate-500">%</span>
+                  </div>
+                ) : (
+                  <span className="text-slate-400 dark:text-neutral-500 font-mono">0% (Off)</span>
+                )}
+              </div>
+              <div className="flex justify-between text-slate-600 dark:text-neutral-400 mt-1">
+                <span>Output VAT Amount:</span>
+                <span className="font-mono">{formatCurrency(taxTotal, currencySymbol)}</span>
+              </div>
             </div>
             <div className="flex justify-between font-bold text-sm text-slate-900 dark:text-neutral-100 border-t border-slate-200 dark:border-neutral-700 pt-1.5">
               <span>Net Quotation Value:</span>

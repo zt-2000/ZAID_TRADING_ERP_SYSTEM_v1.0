@@ -35,6 +35,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [paymentTerms, setPaymentTerms] = useState('30_days');
   const [warehouse, setWarehouse] = useState('central_hub');
   const [notes, setNotes] = useState('');
+  const [applyVat, setApplyVat] = useState(false);
+  const [vatRate, setVatRate] = useState(15);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [items, setItems] = useState<SaleLineItem[]>([
@@ -66,10 +68,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   };
 
   const subtotal = items.reduce((acc, curr) => acc + (curr.quantity * curr.unitPrice || 0), 0);
-  const taxTotal = items.reduce(
-    (acc, curr) => acc + ((curr.quantity * curr.unitPrice * curr.taxRate) / 100 || 0),
-    0
-  );
+  const taxTotal = applyVat ? (subtotal * (Number(vatRate) || 0)) / 100 : 0;
   const totalAmount = subtotal + taxTotal;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -92,6 +91,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         paymentTerms,
         warehouse,
         subtotal,
+        applyVat,
+        vatRate,
         taxTotal,
         total: totalAmount,
         itemsCount: items.length,
@@ -241,17 +242,46 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
 
           <div className="mt-3 flex justify-end">
-            <div className="w-72 space-y-1.5 text-xs">
-              <div className="flex justify-between text-slate-500 dark:text-neutral-400">
-                <span>Subtotal:</span>
+            <div className="w-72 space-y-2 text-xs bg-slate-50 dark:bg-[#151b18] p-3 rounded-lg border border-slate-200 dark:border-neutral-800">
+              <div className="flex justify-between text-slate-600 dark:text-neutral-400">
+                <span>Gross Subtotal:</span>
                 <span className="font-mono tabular-nums">{formatCurrency(subtotal, currencySymbol)}</span>
               </div>
-              <div className="flex justify-between text-slate-500 dark:text-neutral-400">
-                <span>Estimated Tax (15%):</span>
-                <span className="font-mono tabular-nums">{formatCurrency(taxTotal, currencySymbol)}</span>
+              <div className="pt-1 border-t border-slate-200/60 dark:border-neutral-800">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-800 dark:text-neutral-200">
+                    <input
+                      type="checkbox"
+                      checked={applyVat}
+                      onChange={(e) => setApplyVat(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded text-[#167a53] focus:ring-[#167a53] cursor-pointer"
+                    />
+                    <span>Apply Output VAT</span>
+                  </label>
+                  {applyVat ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="100"
+                        value={vatRate}
+                        onChange={(e) => setVatRate(parseFloat(e.target.value) || 0)}
+                        className="w-12 px-1 py-0.5 text-right font-mono rounded border border-slate-300 dark:border-neutral-700 bg-white dark:bg-[#1a231e] text-slate-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-[#167a53]"
+                      />
+                      <span className="text-slate-500">%</span>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400 dark:text-neutral-500 font-mono">0% (Off)</span>
+                  )}
+                </div>
+                <div className="flex justify-between text-slate-600 dark:text-neutral-400 mt-1">
+                  <span>Output VAT Amount:</span>
+                  <span className="font-mono tabular-nums">{formatCurrency(taxTotal, currencySymbol)}</span>
+                </div>
               </div>
               <div className="flex justify-between text-sm font-semibold text-slate-900 dark:text-neutral-100 pt-1.5 border-t border-slate-200 dark:border-neutral-700">
-                <span>Total Due:</span>
+                <span>Total Invoice Due:</span>
                 <span className="font-mono tabular-nums text-[#167a53] dark:text-[#34d399] font-bold">
                   {formatCurrency(totalAmount, currencySymbol)}
                 </span>

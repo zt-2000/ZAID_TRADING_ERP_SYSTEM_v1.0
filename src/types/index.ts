@@ -31,6 +31,7 @@ export interface CompanySettings {
   multicurrencyEnabled: boolean;
   defaultTaxRate: number;
   taxInclusivePricing: boolean;
+  defaultApplyVat?: boolean;
   financialYearStartMonth: number;
   dateFormat: string;
   timeZone: string;
@@ -110,6 +111,8 @@ export interface QuotationRecord {
   items: QuotationLineItem[];
   subtotal: number;
   discountTotal: number;
+  applyVat?: boolean;
+  vatRate?: number;
   taxTotal: number;
   total: number;
   status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted';
@@ -143,6 +146,8 @@ export interface SalesOrderRecord {
   items: SalesOrderLineItem[];
   subtotal: number;
   discountTotal: number;
+  applyVat?: boolean;
+  vatRate?: number;
   taxTotal: number;
   total: number;
   status:

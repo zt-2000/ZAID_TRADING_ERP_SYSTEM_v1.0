@@ -230,8 +230,8 @@ export const QuotationViewModal: React.FC<QuotationViewModalProps> = ({
               </div>
             )}
             <div className="flex justify-between text-slate-600">
-              <span>VAT / Tax Total:</span>
-              <span className="font-mono">{formatCurrency(quotation.taxTotal, currencySymbol)}</span>
+              <span>Output VAT ({quotation.applyVat && quotation.taxTotal > 0 ? `${quotation.vatRate || 15}%` : '0% - Not Applied'}):</span>
+              <span className="font-mono">{formatCurrency(quotation.taxTotal || 0, currencySymbol)}</span>
             </div>
             <div className="flex justify-between font-bold text-sm text-slate-900 border-t border-slate-200 pt-1.5">
               <span>Total Quotation:</span>

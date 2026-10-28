@@ -214,8 +214,8 @@ export const PrintableInvoiceModal: React.FC<PrintableInvoiceModalProps> = ({
               <span className="font-mono">{formatCurrency(invoice.subtotal, currencySymbol)}</span>
             </div>
             <div className="flex justify-between text-slate-600">
-              <span>VAT / Tax (15%):</span>
-              <span className="font-mono">{formatCurrency(invoice.taxTotal, currencySymbol)}</span>
+              <span>Output VAT ({invoice.applyVat && invoice.taxTotal > 0 ? `${invoice.vatRate || 15}%` : '0% - Not Applied'}):</span>
+              <span className="font-mono">{formatCurrency(invoice.taxTotal || 0, currencySymbol)}</span>
             </div>
             <div className="flex justify-between font-bold text-sm text-slate-900 border-t border-slate-200 pt-1.5">
               <span>Total Invoice Amount:</span>

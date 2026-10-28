@@ -116,9 +116,9 @@ export const FinancePage: React.FC<FinancePageProps> = ({
       },
       {
         code: '1015',
-        name: 'Van Fleet Float Cash Box',
-        institution: 'Mobile Cash Drawer',
-        accountNumber: 'FLOAT-VAN-01',
+        name: 'Delivery COD Clearing Box',
+        institution: 'COD Clearing Drawer',
+        accountNumber: 'COD-CLEAR-01',
         currency: 'LKR',
         bookBalance: 0,
         reconciledDate: '2026-10-28',

@@ -21,7 +21,11 @@ import {
   AlertCircle,
   CheckCircle2,
   Lock,
+  Database,
+  RefreshCw,
+  Cloud,
 } from 'lucide-react';
+import { checkSupabaseConnection, migrateLocalDataToCloud } from '../services/supabaseSync';
 
 interface SettingsPageProps {
   settings: CompanySettings;
@@ -38,10 +42,33 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [activeTab, setActiveTab] = useState<
-    'general' | 'currency' | 'tax' | 'warehouses' | 'theme'
+    'general' | 'currency' | 'tax' | 'warehouses' | 'theme' | 'database'
   >('general');
   const [formData, setFormData] = useState<CompanySettings>(initialSettings);
   const [isSaving, setIsSaving] = useState(false);
+  const [dbStatus, setDbStatus] = useState<{ isConfigured: boolean; connected: boolean; message: string } | null>(null);
+  const [isMigrating, setIsMigrating] = useState(false);
+
+  const handleTestConnection = async () => {
+    const res = await checkSupabaseConnection();
+    setDbStatus(res);
+    if (res.connected) {
+      showToast('Database Connected', res.message, 'success');
+    } else {
+      showToast('Database Status', res.message, res.isConfigured ? 'warning' : 'info');
+    }
+  };
+
+  const handleMigrateCloud = async () => {
+    setIsMigrating(true);
+    const res = await migrateLocalDataToCloud();
+    setIsMigrating(false);
+    if (res.success) {
+      showToast('Migration Complete', 'Local storage entities successfully upserted to Supabase cloud DB.', 'success');
+    } else {
+      showToast('Migration Warning', res.errors.join('; '), 'error');
+    }
+  };
 
   // Logo state
   const [logoPreview, setLogoPreview] = useState<string | null>(initialSettings.logoUrl || null);
@@ -260,6 +287,22 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         >
           <Palette className="w-4 h-4" />
           <span>Theme & Interface</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('database');
+            handleTestConnection();
+          }}
+          className={`pb-3 flex items-center gap-2 border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeTab === 'database'
+              ? 'border-[#167a53] text-[#167a53] dark:text-[#34d399]'
+              : 'border-transparent text-slate-500 dark:text-neutral-400 hover:text-slate-800 dark:hover:text-neutral-200'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>Supabase & Multi-User DB</span>
         </button>
       </div>
 
@@ -676,6 +719,81 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   </p>
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'database' && (
+          <div className="p-6 rounded-xl bg-white dark:bg-[#181f1b] border border-slate-200 dark:border-neutral-800 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-neutral-800 pb-4">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-neutral-100 flex items-center gap-2">
+                  <Database className="w-4 h-4 text-[#167a53] dark:text-[#34d399]" />
+                  <span>Supabase PostgreSQL & Multi-User Shared Persistence</span>
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-neutral-400 mt-0.5">
+                  Verify cloud connection status, execute idempotent migrations, and audit RLS security
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestConnection}
+                  leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                >
+                  Test Connection
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={handleMigrateCloud}
+                  isLoading={isMigrating}
+                  leftIcon={<Cloud className="w-3.5 h-3.5" />}
+                >
+                  Migrate Local Data
+                </Button>
+              </div>
+            </div>
+
+            {/* Connection Status Box */}
+            <div className={`p-4 rounded-xl border text-xs space-y-2 ${
+              dbStatus?.connected
+                ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50 text-emerald-800 dark:text-emerald-300'
+                : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300'
+            }`}>
+              <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-[11px]">
+                {dbStatus?.connected ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Supabase Cloud Database Connected</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="w-4 h-4 text-amber-600" />
+                    <span>Operating Mode: Local Storage Browser Persistence</span>
+                  </>
+                )}
+              </div>
+              <p className="leading-relaxed">
+                {dbStatus?.message || 'Click "Test Connection" to inspect Supabase cloud connectivity status.'}
+              </p>
+            </div>
+
+            {/* Migration Schema Notice */}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#151b18] border border-slate-200 dark:border-neutral-800 text-xs space-y-2">
+              <p className="font-bold text-slate-800 dark:text-neutral-200">
+                SQL Schema Migration Path:
+              </p>
+              <code className="block p-2 rounded bg-slate-100 dark:bg-[#111613] font-mono text-[11px] text-slate-700 dark:text-neutral-300">
+                /supabase/migrations/20261028_zaid_erp_initial_schema.sql
+              </code>
+              <p className="text-slate-500 dark:text-neutral-400 text-[11px] leading-relaxed">
+                Includes DDL definitions for 17 relational tables, foreign key constraints, indexes on `sku` and `invoice_number`, and Row Level Security (RLS) policies enforcing multi-tenant company isolation via `auth.uid()`.
+              </p>
             </div>
           </div>
         )}

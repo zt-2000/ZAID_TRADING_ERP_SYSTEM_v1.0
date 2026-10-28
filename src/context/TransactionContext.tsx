@@ -86,6 +86,8 @@ export interface SaleRecord {
   paymentTerms: string;
   warehouse: string;
   subtotal: number;
+  applyVat?: boolean;
+  vatRate?: number;
   taxTotal: number;
   total: number;
   paid: number;
@@ -329,6 +331,8 @@ interface TransactionContextType {
     paymentTerms: string;
     warehouse: string;
     subtotal: number;
+    applyVat?: boolean;
+    vatRate?: number;
     taxTotal: number;
     total: number;
     itemsCount: number;
@@ -380,6 +384,8 @@ interface TransactionContextType {
     items: QuotationLineItem[];
     subtotal: number;
     discountTotal: number;
+    applyVat?: boolean;
+    vatRate?: number;
     taxTotal: number;
     total: number;
     notes?: string;
@@ -406,6 +412,8 @@ interface TransactionContextType {
     items: SalesOrderLineItem[];
     subtotal: number;
     discountTotal: number;
+    applyVat?: boolean;
+    vatRate?: number;
     taxTotal: number;
     total: number;
     notes?: string;
@@ -706,7 +714,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const accountLabels: Record<string, { code: string; name: string }> = {
         petty_cash: { code: '1010', name: 'Central Warehouse Petty Cash' },
         alrajhi_bank: { code: '1020', name: 'Corporate Operating Bank Account' },
-        van_cash: { code: '1015', name: 'Van Float Cash Drawer' },
+        delivery_cod: { code: '1015', name: 'Delivery COD Clearing Account' },
+        van_cash: { code: '1015', name: 'Delivery COD Clearing Account' },
       };
 
       const creditAccount = accountLabels[data.paymentAccount] || {
@@ -774,6 +783,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       paymentTerms: string;
       warehouse: string;
       subtotal: number;
+      applyVat?: boolean;
+      vatRate?: number;
       taxTotal: number;
       total: number;
       itemsCount: number;
@@ -791,6 +802,9 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       dueDateObj.setDate(dueDateObj.getDate() + days);
       const dueDate = dueDateObj.toISOString().split('T')[0];
 
+      const isVatApplied = data.applyVat ?? (data.taxTotal > 0);
+      const effectiveVatRate = data.vatRate || 15;
+
       const newSale: SaleRecord = {
         id: `sale_${Date.now()}`,
         invoiceNumber: invNo,
@@ -801,7 +815,9 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         paymentTerms: data.paymentTerms,
         warehouse: data.warehouse,
         subtotal: data.subtotal,
-        taxTotal: data.taxTotal,
+        applyVat: isVatApplied,
+        vatRate: effectiveVatRate,
+        taxTotal: isVatApplied ? data.taxTotal : 0,
         total: data.total,
         paid: data.paymentTerms === 'immediate' ? data.total : 0,
         balance: data.paymentTerms === 'immediate' ? 0 : data.total,
@@ -834,12 +850,12 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         memo: `Revenue from ${invNo}`,
         debit: 0,
         credit: data.subtotal,
-        runningBalance: lastBal + data.taxTotal,
+        runningBalance: lastBal + (isVatApplied ? data.taxTotal : 0),
         status: 'posted',
       };
 
       const newEntries = [glLine1, glLine2];
-      if (data.taxTotal > 0) {
+      if (isVatApplied && data.taxTotal > 0) {
         newEntries.push({
           id: `gl_${Date.now()}_3`,
           date: today,
@@ -1008,6 +1024,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       items: QuotationLineItem[];
       subtotal: number;
       discountTotal: number;
+      applyVat?: boolean;
+      vatRate?: number;
       taxTotal: number;
       total: number;
       notes?: string;
@@ -1027,6 +1045,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         items: data.items,
         subtotal: data.subtotal,
         discountTotal: data.discountTotal,
+        applyVat: data.applyVat ?? (data.taxTotal > 0),
+        vatRate: data.vatRate || 15,
         taxTotal: data.taxTotal,
         total: data.total,
         status: data.status || 'draft',
@@ -1104,6 +1124,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         items: soItems,
         subtotal: quotation.subtotal,
         discountTotal: quotation.discountTotal,
+        applyVat: quotation.applyVat ?? (quotation.taxTotal > 0),
+        vatRate: quotation.vatRate || 15,
         taxTotal: quotation.taxTotal,
         total: quotation.total,
         status: 'confirmed',
@@ -1172,6 +1194,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       items: SalesOrderLineItem[];
       subtotal: number;
       discountTotal: number;
+      applyVat?: boolean;
+      vatRate?: number;
       taxTotal: number;
       total: number;
       notes?: string;
@@ -1195,6 +1219,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         items: data.items,
         subtotal: data.subtotal,
         discountTotal: data.discountTotal,
+        applyVat: data.applyVat ?? (data.taxTotal > 0),
+        vatRate: data.vatRate || 15,
         taxTotal: data.taxTotal,
         total: data.total,
         status: 'new',
