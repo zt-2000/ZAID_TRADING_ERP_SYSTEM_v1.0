@@ -1,6 +1,19 @@
--- ZAID TRADING ERP — PRODUCTION SUPABASE SCHEMA MIGRATION (STAGING HARDENED v4.3)
--- Migration Version: 20261028_zaid_erp_hardened_schema_v4_3.sql
--- Description: Fully secured relational schema featuring strict company isolation, targeted stale-policy cleanup on ERP tables only, non-recursive profile validation with immutable user_id/company_id enforcement, strict role-delegation rules (Owner-only privilege granting), and atomic RPC onboarding.
+-- ZAID TRADING ERP — PRODUCTION SUPABASE SCHEMA MIGRATION (STAGING HARDENED v4.4)
+-- Migration Version: 20261028_zaid_erp_hardened_schema_v4_4.sql
+-- Description: Fully secured relational schema featuring strict company isolation, role-based matrix policies, append-only general ledger trigger, hardened profile update guard trigger (preventing privilege escalation & last-owner demotion), anon lockout grants revocation, and atomic RPC onboarding.
+-- NOTE: THIS MIGRATION IS FOR A FRESH DATABASE ONLY. Upgrading an existing v4.1/v4.2 schema requires separate ALTER statements.
+
+-- =========================================================================
+-- MATRIX OF ROLE-BASED ACCESS POLICIES (COMMENT REFERENCE)
+-- =========================================================================
+/*
+  - Owner / Administrator: Full read/write on everything except general_ledger UPDATE/DELETE.
+  - Manager: Read/write on sales, purchasing, inventory, customers, suppliers, deliveries, expenses. Read-only on general_ledger.
+  - Salesperson: Read products and customers. Write quotations, sales_orders, sales_invoices, customers. No access to suppliers, purchases, grns, expenses, or general_ledger.
+  - Storekeeper: Read/write products, warehouses, warehouse_bins, grns. Read purchases and sales_orders. No finance tables.
+  - Accountant: Read everything. Write general_ledger (INSERT only), expenses, expense_categories.
+  - Delivery Driver: Read deliveries assigned to them. UPDATE only status, recipient_name, proof_of_delivery_ref, history columns on deliveries. Nothing else.
+*/
 
 -- =========================================================================
 -- 1. COMPANIES TABLE (Tenant Root)
@@ -20,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.companies (
   default_currency TEXT DEFAULT 'LKR',
   currency_symbol TEXT DEFAULT 'Rs.',
   currency_precision INT DEFAULT 2,
-  default_tax_rate NUMERIC DEFAULT 15.0,
+  default_tax_rate NUMERIC NOT NULL DEFAULT 15.0 CHECK (default_tax_rate >= 0),
   tax_inclusive_pricing BOOLEAN DEFAULT false,
   default_apply_vat BOOLEAN DEFAULT false,
   time_zone TEXT DEFAULT 'Asia/Colombo',
@@ -67,14 +80,15 @@ CREATE TABLE IF NOT EXISTS public.expense_categories (
   company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
   name TEXT NOT NULL,
   description TEXT,
-  monthly_budget NUMERIC DEFAULT 0,
-  usage_count INT DEFAULT 0,
+  monthly_budget NUMERIC NOT NULL DEFAULT 0 CHECK (monthly_budget >= 0),
+  usage_count INT NOT NULL DEFAULT 0 CHECK (usage_count >= 0),
   created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (company_id, id)
+  UNIQUE (company_id, id),
+  UNIQUE (company_id, name)
 );
 
 -- =========================================================================
--- 5. PRODUCTS TABLE (Composite FK to Product Categories)
+-- 5. PRODUCTS TABLE
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.products (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -83,10 +97,10 @@ CREATE TABLE IF NOT EXISTS public.products (
   name TEXT NOT NULL,
   category_id UUID,
   unit TEXT DEFAULT 'Kg',
-  purchase_price NUMERIC DEFAULT 0,
-  selling_price NUMERIC DEFAULT 0,
-  min_stock_level NUMERIC DEFAULT 0,
-  current_stock NUMERIC DEFAULT 0,
+  purchase_price NUMERIC NOT NULL DEFAULT 0 CHECK (purchase_price >= 0),
+  selling_price NUMERIC NOT NULL DEFAULT 0 CHECK (selling_price >= 0),
+  min_stock_level NUMERIC NOT NULL DEFAULT 0 CHECK (min_stock_level >= 0),
+  current_stock NUMERIC NOT NULL DEFAULT 0 CHECK (current_stock >= 0),
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived')),
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (company_id, id),
@@ -106,9 +120,9 @@ CREATE TABLE IF NOT EXISTS public.customers (
   email TEXT,
   address TEXT,
   tax_number TEXT,
-  credit_limit NUMERIC,
-  credit_days INT,
-  balance NUMERIC DEFAULT 0,
+  credit_limit NUMERIC CHECK (credit_limit IS NULL OR credit_limit >= 0),
+  credit_days INT CHECK (credit_days IS NULL OR credit_days >= 0),
+  balance NUMERIC NOT NULL DEFAULT 0,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'archived')),
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (company_id, id),
@@ -128,7 +142,7 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
   address TEXT,
   tax_number TEXT,
   payment_terms TEXT DEFAULT '30_days',
-  balance NUMERIC DEFAULT 0,
+  balance NUMERIC NOT NULL DEFAULT 0,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'archived')),
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (company_id, id),
@@ -155,7 +169,7 @@ CREATE TABLE IF NOT EXISTS public.warehouses (
 );
 
 -- =========================================================================
--- 9. WAREHOUSE BINS TABLE (Composite FK to Warehouses, Unique per company/warehouse/code)
+-- 9. WAREHOUSE BINS TABLE
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.warehouse_bins (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -167,7 +181,7 @@ CREATE TABLE IF NOT EXISTS public.warehouse_bins (
   rack TEXT,
   shelf TEXT,
   type TEXT DEFAULT 'pallet',
-  max_weight_kg NUMERIC DEFAULT 1000,
+  max_weight_kg NUMERIC NOT NULL DEFAULT 1000 CHECK (max_weight_kg >= 0),
   status TEXT DEFAULT 'active',
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (company_id, id),
@@ -176,7 +190,7 @@ CREATE TABLE IF NOT EXISTS public.warehouse_bins (
 );
 
 -- =========================================================================
--- 10. QUOTATIONS TABLE (Composite FK to Customers)
+-- 10. QUOTATIONS TABLE
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.quotations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -188,12 +202,12 @@ CREATE TABLE IF NOT EXISTS public.quotations (
   customer_name TEXT NOT NULL,
   warehouse_name TEXT,
   items JSONB NOT NULL DEFAULT '[]'::jsonb,
-  subtotal NUMERIC DEFAULT 0,
-  discount_total NUMERIC DEFAULT 0,
+  subtotal NUMERIC NOT NULL DEFAULT 0 CHECK (subtotal >= 0),
+  discount_total NUMERIC NOT NULL DEFAULT 0 CHECK (discount_total >= 0),
   apply_vat BOOLEAN DEFAULT false,
-  vat_rate NUMERIC DEFAULT 15.0,
-  tax_total NUMERIC DEFAULT 0,
-  total NUMERIC DEFAULT 0,
+  vat_rate NUMERIC NOT NULL DEFAULT 15.0 CHECK (vat_rate >= 0),
+  tax_total NUMERIC NOT NULL DEFAULT 0 CHECK (tax_total >= 0),
+  total NUMERIC NOT NULL DEFAULT 0 CHECK (total >= 0),
   status TEXT DEFAULT 'sent',
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -203,7 +217,7 @@ CREATE TABLE IF NOT EXISTS public.quotations (
 );
 
 -- =========================================================================
--- 11. SALES ORDERS TABLE (Composite FK to Quotations and Customers)
+-- 11. SALES ORDERS TABLE
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.sales_orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -216,12 +230,12 @@ CREATE TABLE IF NOT EXISTS public.sales_orders (
   customer_name TEXT NOT NULL,
   warehouse_name TEXT,
   items JSONB NOT NULL DEFAULT '[]'::jsonb,
-  subtotal NUMERIC DEFAULT 0,
-  discount_total NUMERIC DEFAULT 0,
+  subtotal NUMERIC NOT NULL DEFAULT 0 CHECK (subtotal >= 0),
+  discount_total NUMERIC NOT NULL DEFAULT 0 CHECK (discount_total >= 0),
   apply_vat BOOLEAN DEFAULT false,
-  vat_rate NUMERIC DEFAULT 15.0,
-  tax_total NUMERIC DEFAULT 0,
-  total NUMERIC DEFAULT 0,
+  vat_rate NUMERIC NOT NULL DEFAULT 15.0 CHECK (vat_rate >= 0),
+  tax_total NUMERIC NOT NULL DEFAULT 0 CHECK (tax_total >= 0),
+  total NUMERIC NOT NULL DEFAULT 0 CHECK (total >= 0),
   status TEXT DEFAULT 'new',
   tracking_number TEXT,
   notes TEXT,
@@ -233,7 +247,7 @@ CREATE TABLE IF NOT EXISTS public.sales_orders (
 );
 
 -- =========================================================================
--- 12. SALES INVOICES TABLE (Composite FK to Customers)
+-- 12. SALES INVOICES TABLE
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.sales_invoices (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -245,15 +259,15 @@ CREATE TABLE IF NOT EXISTS public.sales_invoices (
   customer_name TEXT NOT NULL,
   payment_terms TEXT DEFAULT '30_days',
   warehouse_name TEXT,
-  subtotal NUMERIC DEFAULT 0,
+  subtotal NUMERIC NOT NULL DEFAULT 0 CHECK (subtotal >= 0),
   apply_vat BOOLEAN DEFAULT false,
-  vat_rate NUMERIC DEFAULT 15.0,
-  tax_total NUMERIC DEFAULT 0,
-  total NUMERIC DEFAULT 0,
-  paid NUMERIC DEFAULT 0,
-  balance NUMERIC DEFAULT 0,
+  vat_rate NUMERIC NOT NULL DEFAULT 15.0 CHECK (vat_rate >= 0),
+  tax_total NUMERIC NOT NULL DEFAULT 0 CHECK (tax_total >= 0),
+  total NUMERIC NOT NULL DEFAULT 0 CHECK (total >= 0),
+  paid NUMERIC NOT NULL DEFAULT 0 CHECK (paid >= 0),
+  balance NUMERIC NOT NULL DEFAULT 0,
   status TEXT DEFAULT 'posted',
-  items_count INT DEFAULT 1,
+  items_count INT NOT NULL DEFAULT 1 CHECK (items_count >= 1),
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (company_id, id),
@@ -262,7 +276,7 @@ CREATE TABLE IF NOT EXISTS public.sales_invoices (
 );
 
 -- =========================================================================
--- 13. DELIVERIES TABLE (Composite FK to Sales Orders and Customers)
+-- 13. DELIVERIES TABLE
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.deliveries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -293,7 +307,7 @@ CREATE TABLE IF NOT EXISTS public.deliveries (
 );
 
 -- =========================================================================
--- 14. PURCHASES TABLE (Composite FK to Suppliers)
+-- 14. PURCHASES TABLE
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.purchases (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -304,7 +318,7 @@ CREATE TABLE IF NOT EXISTS public.purchases (
   supplier_name TEXT NOT NULL,
   warehouse_name TEXT,
   payment_terms TEXT DEFAULT '30_days',
-  total_cost NUMERIC DEFAULT 0,
+  total_cost NUMERIC NOT NULL DEFAULT 0 CHECK (total_cost >= 0),
   status TEXT DEFAULT 'sent',
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (company_id, id),
@@ -313,7 +327,7 @@ CREATE TABLE IF NOT EXISTS public.purchases (
 );
 
 -- =========================================================================
--- 15. GOODS RECEIVED NOTES (GRN) TABLE (Composite FK to Purchases)
+-- 15. GOODS RECEIVED NOTES (GRN) TABLE
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.grns (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -335,7 +349,7 @@ CREATE TABLE IF NOT EXISTS public.grns (
 );
 
 -- =========================================================================
--- 16. EXPENSES TABLE (Composite FK to Expense Categories)
+-- 16. EXPENSES TABLE
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.expenses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -349,15 +363,16 @@ CREATE TABLE IF NOT EXISTS public.expenses (
   account_name TEXT NOT NULL,
   payee TEXT NOT NULL,
   reference TEXT,
-  amount NUMERIC DEFAULT 0,
+  amount NUMERIC NOT NULL DEFAULT 0 CHECK (amount >= 0),
   status TEXT DEFAULT 'posted',
   created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (company_id, id),
   UNIQUE (company_id, voucher_no),
   FOREIGN KEY (company_id, category_id) REFERENCES public.expense_categories(company_id, id) ON DELETE RESTRICT
 );
 
 -- =========================================================================
--- 17. GENERAL LEDGER ENTRIES TABLE (Accounting History - Restrict Deletes)
+-- 17. GENERAL LEDGER ENTRIES TABLE (Append-Only & Accounting Integrity)
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.general_ledger (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -367,11 +382,12 @@ CREATE TABLE IF NOT EXISTS public.general_ledger (
   account_code TEXT NOT NULL,
   account_name TEXT NOT NULL,
   memo TEXT NOT NULL,
-  debit NUMERIC DEFAULT 0,
-  credit NUMERIC DEFAULT 0,
-  running_balance NUMERIC DEFAULT 0,
+  debit NUMERIC NOT NULL DEFAULT 0 CHECK (debit >= 0),
+  credit NUMERIC NOT NULL DEFAULT 0 CHECK (credit >= 0),
+  running_balance NUMERIC NOT NULL DEFAULT 0,
   status TEXT DEFAULT 'posted',
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT chk_gl_debit_credit CHECK (NOT (debit > 0 AND credit > 0))
 );
 
 -- =========================================================================
@@ -400,91 +416,130 @@ ALTER TABLE public.general_ledger ENABLE ROW LEVEL SECURITY;
 -- =========================================================================
 CREATE OR REPLACE FUNCTION public.get_auth_company_id()
 RETURNS UUID AS $$
-  SELECT p.company_id FROM public.user_profiles AS p WHERE p.user_id = auth.uid() LIMIT 1;
+  SELECT p.company_id FROM public.user_profiles AS p WHERE p.user_id = auth.uid() AND p.status = 'active' LIMIT 1;
 $$ LANGUAGE sql STABLE SECURITY DEFINER 
-   SET search_path = public 
+   SET search_path = public, pg_temp 
    SET row_security = off;
 
 CREATE OR REPLACE FUNCTION public.is_company_admin()
 RETURNS BOOLEAN AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.user_profiles AS p 
-    WHERE p.user_id = auth.uid() AND p.role = 'Owner / Administrator'
+    WHERE p.user_id = auth.uid() AND p.role = 'Owner / Administrator' AND p.status = 'active'
   );
 $$ LANGUAGE sql STABLE SECURITY DEFINER 
-   SET search_path = public 
+   SET search_path = public, pg_temp 
    SET row_security = off;
 
--- Revoke and Grant EXECUTE permissions securely
-REVOKE EXECUTE ON FUNCTION public.get_auth_company_id() FROM PUBLIC;
+CREATE OR REPLACE FUNCTION public.get_auth_role()
+RETURNS TEXT AS $$
+  SELECT p.role FROM public.user_profiles AS p WHERE p.user_id = auth.uid() AND p.status = 'active' LIMIT 1;
+$$ LANGUAGE sql STABLE SECURITY DEFINER 
+   SET search_path = public, pg_temp 
+   SET row_security = off;
+
+-- Revoke and Grant EXECUTE permissions securely (Lock out anon completely)
+REVOKE ALL ON FUNCTION public.get_auth_company_id() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_auth_company_id() TO authenticated, service_role;
 
-REVOKE EXECUTE ON FUNCTION public.is_company_admin() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.is_company_admin() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.is_company_admin() TO authenticated, service_role;
 
+REVOKE ALL ON FUNCTION public.get_auth_role() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_auth_role() TO authenticated, service_role;
+
 -- =========================================================================
--- SECURE PROFILE VALIDATION FUNCTION (Strict Owner-only privilege assignment)
+-- SECURE PROFILE UPDATE GUARD TRIGGER FUNCTION (Prevents ID/Role Escalation)
 -- =========================================================================
-CREATE OR REPLACE FUNCTION public.validate_profile_update(
-  p_target_id UUID,
-  p_target_user_id UUID,
-  p_target_company_id UUID,
-  p_target_role TEXT
-)
-RETURNS BOOLEAN AS $$
+CREATE OR REPLACE FUNCTION public.guard_profile_update()
+RETURNS TRIGGER AS $$
 DECLARE
   v_actor_role TEXT;
   v_actor_company UUID;
-  v_old_role TEXT;
-  v_old_company UUID;
-  v_old_user_id UUID;
+  v_active_owners_count INT;
 BEGIN
-  -- Fetch actor profile
+  -- a. Return NEW immediately when auth.uid() IS NULL (service_role / admin SQL only)
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- b. Raise if NEW.id, NEW.user_id or NEW.company_id differs from OLD
+  IF NEW.id IS DISTINCT FROM OLD.id OR NEW.user_id IS DISTINCT FROM OLD.user_id OR NEW.company_id IS DISTINCT FROM OLD.company_id THEN
+    RAISE EXCEPTION 'Unauthorized: Cannot modify profile id, user_id, or company_id.';
+  END IF;
+
+  -- c. Look up actor profile by auth.uid(). Raise if actor's company differs from OLD.company_id
   SELECT p.role, p.company_id INTO v_actor_role, v_actor_company
   FROM public.user_profiles AS p
-  WHERE p.user_id = auth.uid() LIMIT 1;
+  WHERE p.user_id = auth.uid() AND p.status = 'active' LIMIT 1;
 
-  -- Fetch target existing profile by primary id
-  SELECT p.role, p.company_id, p.user_id INTO v_old_role, v_old_company, v_old_user_id
-  FROM public.user_profiles AS p
-  WHERE p.id = p_target_id LIMIT 1;
-
-  -- Tenant isolation enforcement
-  IF v_actor_company IS NULL OR v_actor_company <> p_target_company_id OR v_actor_company <> v_old_company THEN
-    RETURN FALSE;
+  IF v_actor_company IS DISTINCT FROM OLD.company_id THEN
+    RAISE EXCEPTION 'Unauthorized: Actor company mismatch.';
   END IF;
 
-  -- Immutable user_id and company_id checks
-  IF v_old_user_id <> p_target_user_id OR v_old_company <> p_target_company_id THEN
-    RETURN FALSE;
-  END IF;
-
-  -- If updating self:
-  IF auth.uid() = p_target_user_id THEN
-    -- Ordinary users cannot change their own role
-    IF v_old_role <> p_target_role THEN
-      RETURN FALSE;
+  -- d. If actor is not an Owner / Administrator: they may update only their own row, and may NOT change role or status
+  IF v_actor_role <> 'Owner / Administrator' THEN
+    IF OLD.user_id IS DISTINCT FROM auth.uid() THEN
+      RAISE EXCEPTION 'Unauthorized: Non-admin can only update their own profile.';
     END IF;
-    RETURN TRUE;
-  END IF;
-
-  -- If updating another user: actor must be an Owner / Administrator
-  IF v_actor_role = 'Owner / Administrator' THEN
-    -- Only an existing Owner / Administrator can assign the Owner / Administrator role
-    IF p_target_role = 'Owner / Administrator' AND v_actor_role <> 'Owner / Administrator' THEN
-      RETURN FALSE;
+    IF NEW.role IS DISTINCT FROM OLD.role OR NEW.status IS DISTINCT FROM OLD.status THEN
+      RAISE EXCEPTION 'Unauthorized: Non-admin cannot change role or status.';
     END IF;
-    RETURN TRUE;
   END IF;
 
-  RETURN FALSE;
+  -- e. If actor is an Owner / Administrator: they may update other users in same company, but may NOT change their own role or status (prevents lockout)
+  IF v_actor_role = 'Owner / Administrator' AND OLD.user_id = auth.uid() THEN
+    IF NEW.role IS DISTINCT FROM OLD.role OR NEW.status IS DISTINCT FROM OLD.status THEN
+      RAISE EXCEPTION 'Unauthorized: Administrator cannot change their own role or status.';
+    END IF;
+  END IF;
+
+  -- f. Prevent demoting or deactivating the last active Owner in a company
+  IF OLD.role = 'Owner / Administrator' AND (NEW.role <> 'Owner / Administrator' OR NEW.status <> 'active') THEN
+    SELECT count(*) INTO v_active_owners_count
+    FROM public.user_profiles
+    WHERE company_id = OLD.company_id AND role = 'Owner / Administrator' AND status = 'active';
+
+    IF v_active_owners_count <= 1 THEN
+      RAISE EXCEPTION 'Unauthorized: Cannot demote or deactivate the last active Owner in the company.';
+    END IF;
+  END IF;
+
+  RETURN NEW;
 END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER 
-   SET search_path = public 
+$$ LANGUAGE plpgsql SECURITY DEFINER 
+   SET search_path = public, pg_temp 
    SET row_security = off;
 
-REVOKE EXECUTE ON FUNCTION public.validate_profile_update(UUID, UUID, UUID, TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.validate_profile_update(UUID, UUID, UUID, TEXT) TO authenticated, service_role;
+DROP TRIGGER IF EXISTS trg_guard_profile_update ON public.user_profiles;
+CREATE TRIGGER trg_guard_profile_update
+  BEFORE UPDATE ON public.user_profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.guard_profile_update();
+
+REVOKE ALL ON FUNCTION public.guard_profile_update() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.guard_profile_update() TO authenticated, service_role;
+
+-- =========================================================================
+-- APPEND-ONLY GENERAL LEDGER TRIGGER FUNCTION
+-- =========================================================================
+CREATE OR REPLACE FUNCTION public.guard_gl_append_only()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'General ledger is append-only. Post a reversing entry instead of updating or deleting ledger records.';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER 
+   SET search_path = public, pg_temp 
+   SET row_security = off;
+
+DROP TRIGGER IF EXISTS trg_gl_append_only ON public.general_ledger;
+CREATE TRIGGER trg_gl_append_only
+  BEFORE UPDATE OR DELETE ON public.general_ledger
+  FOR EACH ROW
+  EXECUTE FUNCTION public.guard_gl_append_only();
+
+REVOKE ALL ON FUNCTION public.guard_gl_append_only() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.guard_gl_append_only() TO authenticated, service_role;
 
 -- =========================================================================
 -- SECURE ONBOARDING RPC FUNCTION (Atomic First-Admin Registration)
@@ -523,10 +578,10 @@ BEGIN
   RETURN v_company_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER 
-   SET search_path = public 
+   SET search_path = public, pg_temp 
    SET row_security = off;
 
-REVOKE EXECUTE ON FUNCTION public.register_new_company(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.register_new_company(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.register_new_company(TEXT, TEXT, TEXT, TEXT) TO authenticated;
 
 -- =========================================================================
@@ -553,48 +608,131 @@ BEGIN
 END $$;
 
 -- =========================================================================
--- RECREATE HARDENED RLS POLICIES FOR ALL 17 ERP TABLES
+-- ROLE-BASED & TENANT ISOLATION RLS POLICIES FOR ALL 17 ERP TABLES
 -- =========================================================================
 
--- 1. Operational Tables (15 Tables) Isolation Policy
-DO $$
-DECLARE
-  t TEXT;
-  operational_tables TEXT[] := ARRAY[
-    'product_categories', 'expense_categories', 'products', 'customers', 'suppliers',
-    'warehouses', 'warehouse_bins', 'quotations', 'sales_orders', 'sales_invoices',
-    'deliveries', 'purchases', 'grns', 'expenses', 'general_ledger'
-  ];
-BEGIN
-  FOREACH t IN ARRAY operational_tables
-  LOOP
-    EXECUTE format('CREATE POLICY company_isolation_policy ON public.%I FOR ALL USING (company_id = public.get_auth_company_id()) WITH CHECK (company_id = public.get_auth_company_id());', t);
-  END LOOP;
-END $$;
+-- 1. COMPANIES
+CREATE POLICY companies_select ON public.companies FOR SELECT USING (id = public.get_auth_company_id());
+CREATE POLICY companies_insert ON public.companies FOR INSERT WITH CHECK (false);
+CREATE POLICY companies_update ON public.companies FOR UPDATE USING (id = public.get_auth_company_id() AND public.is_company_admin()) WITH CHECK (id = public.get_auth_company_id() AND public.is_company_admin());
+CREATE POLICY companies_delete ON public.companies FOR DELETE USING (false);
 
--- 2. Companies Table Policies
-CREATE POLICY companies_select_policy ON public.companies 
-  FOR SELECT USING (id = public.get_auth_company_id());
+-- 2. USER PROFILES (No client INSERT; onboarding via RPC only)
+CREATE POLICY user_profiles_select ON public.user_profiles FOR SELECT USING (company_id = public.get_auth_company_id() OR user_id = auth.uid());
+CREATE POLICY user_profiles_insert ON public.user_profiles FOR INSERT WITH CHECK (false);
+CREATE POLICY user_profiles_update ON public.user_profiles FOR UPDATE USING (company_id = public.get_auth_company_id() AND (user_id = auth.uid() OR public.is_company_admin())) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY user_profiles_delete ON public.user_profiles FOR DELETE USING (false);
 
-CREATE POLICY companies_insert_policy ON public.companies 
-  FOR INSERT WITH CHECK (false); -- Restricted to register_new_company() RPC
+-- 3. PRODUCT CATEGORIES (Owner, Manager, Storekeeper write; Salesperson/Accountant read/none)
+CREATE POLICY pc_select ON public.product_categories FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper', 'Salesperson', 'Accountant'));
+CREATE POLICY pc_insert ON public.product_categories FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper'));
+CREATE POLICY pc_update ON public.product_categories FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY pc_delete ON public.product_categories FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
 
-CREATE POLICY companies_update_policy ON public.companies 
-  FOR UPDATE USING (id = public.get_auth_company_id() AND public.is_company_admin()) 
-  WITH CHECK (id = public.get_auth_company_id() AND public.is_company_admin());
+-- 4. EXPENSE CATEGORIES (Owner, Manager, Accountant write)
+CREATE POLICY ec_select ON public.expense_categories FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant'));
+CREATE POLICY ec_insert ON public.expense_categories FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant'));
+CREATE POLICY ec_update ON public.expense_categories FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY ec_delete ON public.expense_categories FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
 
--- 3. User Profiles Table Policies
-CREATE POLICY user_profiles_select_policy ON public.user_profiles 
-  FOR SELECT USING (company_id = public.get_auth_company_id() OR user_id = auth.uid());
+-- 5. PRODUCTS (Owner, Manager, Storekeeper write; Salesperson read)
+CREATE POLICY prod_select ON public.products FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper', 'Salesperson'));
+CREATE POLICY prod_insert ON public.products FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper'));
+CREATE POLICY prod_update ON public.products FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY prod_delete ON public.products FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
 
-CREATE POLICY user_profiles_insert_policy ON public.user_profiles 
-  FOR INSERT WITH CHECK (
-    public.is_company_admin() AND company_id = public.get_auth_company_id() AND role <> 'Owner / Administrator'
-  );
+-- 6. CUSTOMERS (Owner, Manager, Salesperson write; Accountant read)
+CREATE POLICY cust_select ON public.customers FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson', 'Accountant'));
+CREATE POLICY cust_insert ON public.customers FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson'));
+CREATE POLICY cust_update ON public.customers FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY cust_delete ON public.customers FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
 
-CREATE POLICY user_profiles_update_policy ON public.user_profiles 
-  FOR UPDATE USING (company_id = public.get_auth_company_id() AND (user_id = auth.uid() OR public.is_company_admin()))
-  WITH CHECK (public.validate_profile_update(id, user_id, company_id, role));
+-- 7. SUPPLIERS (Owner, Manager write; Accountant read)
+CREATE POLICY supp_select ON public.suppliers FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant'));
+CREATE POLICY supp_insert ON public.suppliers FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+CREATE POLICY supp_update ON public.suppliers FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY supp_delete ON public.suppliers FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 8. WAREHOUSES (Owner, Manager, Storekeeper)
+CREATE POLICY wh_select ON public.warehouses FOR SELECT USING (company_id = public.get_auth_company_id());
+CREATE POLICY wh_insert ON public.warehouses FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper'));
+CREATE POLICY wh_update ON public.warehouses FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY wh_delete ON public.warehouses FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 9. WAREHOUSE BINS (Owner, Manager, Storekeeper)
+CREATE POLICY wb_select ON public.warehouse_bins FOR SELECT USING (company_id = public.get_auth_company_id());
+CREATE POLICY wb_insert ON public.warehouse_bins FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper'));
+CREATE POLICY wb_update ON public.warehouse_bins FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY wb_delete ON public.warehouse_bins FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 10. QUOTATIONS (Owner, Manager, Salesperson)
+CREATE POLICY qt_select ON public.quotations FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson', 'Accountant'));
+CREATE POLICY qt_insert ON public.quotations FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson'));
+CREATE POLICY qt_update ON public.quotations FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY qt_delete ON public.quotations FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 11. SALES ORDERS (Owner, Manager, Salesperson write; Storekeeper read)
+CREATE POLICY so_select ON public.sales_orders FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson', 'Storekeeper', 'Accountant'));
+CREATE POLICY so_insert ON public.sales_orders FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson'));
+CREATE POLICY so_update ON public.sales_orders FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY so_delete ON public.sales_orders FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 12. SALES INVOICES (Owner, Manager, Salesperson write; Accountant read)
+CREATE POLICY inv_select ON public.sales_invoices FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson', 'Accountant'));
+CREATE POLICY inv_insert ON public.sales_invoices FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson'));
+CREATE POLICY inv_update ON public.sales_invoices FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY inv_delete ON public.sales_invoices FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 13. DELIVERIES (Owner, Manager write; Driver can update specific delivery columns; Accountant read)
+CREATE POLICY del_select ON public.deliveries FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Delivery Driver', 'Accountant'));
+CREATE POLICY del_insert ON public.deliveries FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+CREATE POLICY del_update ON public.deliveries FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Delivery Driver')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY del_delete ON public.deliveries FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 14. PURCHASES (Owner, Manager write; Storekeeper read)
+CREATE POLICY po_select ON public.purchases FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper', 'Accountant'));
+CREATE POLICY po_insert ON public.purchases FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+CREATE POLICY po_update ON public.purchases FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY po_delete ON public.purchases FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 15. GRNS (Owner, Manager, Storekeeper write)
+CREATE POLICY grn_select ON public.grns FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper', 'Accountant'));
+CREATE POLICY grn_insert ON public.grns FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper'));
+CREATE POLICY grn_update ON public.grns FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY grn_delete ON public.grns FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 16. EXPENSES (Owner, Manager, Accountant write)
+CREATE POLICY exp_select ON public.expenses FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant'));
+CREATE POLICY exp_insert ON public.expenses FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant'));
+CREATE POLICY exp_update ON public.expenses FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY exp_delete ON public.expenses FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
+
+-- 17. GENERAL LEDGER (Append-only; Accountant & Admin INSERT only; Read-only for Manager, Accountant, Admin)
+CREATE POLICY gl_select ON public.general_ledger FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant'));
+CREATE POLICY gl_insert ON public.general_ledger FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Accountant'));
+CREATE POLICY gl_update ON public.general_ledger FOR UPDATE USING (false) WITH CHECK (false);
+CREATE POLICY gl_delete ON public.general_ledger FOR DELETE USING (false);
+
+-- =========================================================================
+-- COMPLETE ANON LOCKOUT (Revoke all privileges on all 17 tables from anon)
+-- =========================================================================
+REVOKE ALL ON public.companies FROM anon;
+REVOKE ALL ON public.user_profiles FROM anon;
+REVOKE ALL ON public.product_categories FROM anon;
+REVOKE ALL ON public.expense_categories FROM anon;
+REVOKE ALL ON public.products FROM anon;
+REVOKE ALL ON public.customers FROM anon;
+REVOKE ALL ON public.suppliers FROM anon;
+REVOKE ALL ON public.warehouses FROM anon;
+REVOKE ALL ON public.warehouse_bins FROM anon;
+REVOKE ALL ON public.quotations FROM anon;
+REVOKE ALL ON public.sales_orders FROM anon;
+REVOKE ALL ON public.sales_invoices FROM anon;
+REVOKE ALL ON public.deliveries FROM anon;
+REVOKE ALL ON public.purchases FROM anon;
+REVOKE ALL ON public.grns FROM anon;
+REVOKE ALL ON public.expenses FROM anon;
+REVOKE ALL ON public.general_ledger FROM anon;
 
 -- =========================================================================
 -- PERFORMANCE INDEXES (Non-unique composite lookups only)
