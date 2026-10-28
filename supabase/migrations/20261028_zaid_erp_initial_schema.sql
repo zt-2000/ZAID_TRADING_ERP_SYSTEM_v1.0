@@ -1,7 +1,7 @@
--- ZAID TRADING ERP — PRODUCTION SUPABASE SCHEMA MIGRATION (STAGING HARDENED v4.4)
--- Migration Version: 20261028_zaid_erp_hardened_schema_v4_4.sql
--- Description: Fully secured relational schema featuring strict company isolation, role-based matrix policies, append-only general ledger trigger, hardened profile update guard trigger (preventing privilege escalation & last-owner demotion), anon lockout grants revocation, and atomic RPC onboarding.
--- NOTE: THIS MIGRATION IS FOR A FRESH DATABASE ONLY. Upgrading an existing v4.1/v4.2 schema requires separate ALTER statements.
+-- ZAID TRADING ERP — PRODUCTION SUPABASE SCHEMA MIGRATION (STAGING HARDENED v4.5)
+-- Migration Version: 20261028_zaid_erp_hardened_schema_v4_5.sql
+-- Description: Fully secured relational schema featuring strict tenant isolation, role-based matrix RLS policies, secure server-side journal posting RPC with debit/credit balance validation, delivery driver update restrictions (via trigger guard & RPC), append-only general ledger trigger, and complete anon lockout.
+-- IMPORTANT: THIS MIGRATION IS FOR A FRESH DATABASE ONLY. Upgrading an existing v4.x schema requires separate ALTER statements.
 
 -- =========================================================================
 -- MATRIX OF ROLE-BASED ACCESS POLICIES (COMMENT REFERENCE)
@@ -11,8 +11,8 @@
   - Manager: Read/write on sales, purchasing, inventory, customers, suppliers, deliveries, expenses. Read-only on general_ledger.
   - Salesperson: Read products and customers. Write quotations, sales_orders, sales_invoices, customers. No access to suppliers, purchases, grns, expenses, or general_ledger.
   - Storekeeper: Read/write products, warehouses, warehouse_bins, grns. Read purchases and sales_orders. No finance tables.
-  - Accountant: Read everything. Write general_ledger (INSERT only), expenses, expense_categories.
-  - Delivery Driver: Read deliveries assigned to them. UPDATE only status, recipient_name, proof_of_delivery_ref, history columns on deliveries. Nothing else.
+  - Accountant: Read everything. Write general_ledger (via secure RPC only), expenses, expense_categories.
+  - Delivery Driver: Read deliveries assigned to their profile name. UPDATE specific allowed delivery fields only (via trigger guard).
 */
 
 -- =========================================================================
@@ -292,7 +292,7 @@ CREATE TABLE IF NOT EXISTS public.deliveries (
   actual_delivery_date TIMESTAMPTZ,
   assigned_staff TEXT,
   vehicle_details TEXT,
-  status TEXT DEFAULT 'scheduled',
+  status TEXT DEFAULT 'scheduled' CHECK (status IN ('Pending', 'Scheduled', 'Preparing', 'Dispatched', 'In Transit', 'Delivered', 'Failed', 'Cancelled', 'scheduled', 'delivered')),
   items JSONB NOT NULL DEFAULT '[]'::jsonb,
   recipient_name TEXT,
   proof_of_delivery_ref TEXT,
@@ -438,6 +438,13 @@ $$ LANGUAGE sql STABLE SECURITY DEFINER
    SET search_path = public, pg_temp 
    SET row_security = off;
 
+CREATE OR REPLACE FUNCTION public.get_auth_profile_name()
+RETURNS TEXT AS $$
+  SELECT p.name FROM public.user_profiles AS p WHERE p.user_id = auth.uid() AND p.status = 'active' LIMIT 1;
+$$ LANGUAGE sql STABLE SECURITY DEFINER 
+   SET search_path = public, pg_temp 
+   SET row_security = off;
+
 -- Revoke and Grant EXECUTE permissions securely (Lock out anon completely)
 REVOKE ALL ON FUNCTION public.get_auth_company_id() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_auth_company_id() TO authenticated, service_role;
@@ -447,6 +454,9 @@ GRANT EXECUTE ON FUNCTION public.is_company_admin() TO authenticated, service_ro
 
 REVOKE ALL ON FUNCTION public.get_auth_role() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_auth_role() TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.get_auth_profile_name() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_auth_profile_name() TO authenticated, service_role;
 
 -- =========================================================================
 -- SECURE PROFILE UPDATE GUARD TRIGGER FUNCTION (Prevents ID/Role Escalation)
@@ -458,17 +468,14 @@ DECLARE
   v_actor_company UUID;
   v_active_owners_count INT;
 BEGIN
-  -- a. Return NEW immediately when auth.uid() IS NULL (service_role / admin SQL only)
   IF auth.uid() IS NULL THEN
     RETURN NEW;
   END IF;
 
-  -- b. Raise if NEW.id, NEW.user_id or NEW.company_id differs from OLD
   IF NEW.id IS DISTINCT FROM OLD.id OR NEW.user_id IS DISTINCT FROM OLD.user_id OR NEW.company_id IS DISTINCT FROM OLD.company_id THEN
     RAISE EXCEPTION 'Unauthorized: Cannot modify profile id, user_id, or company_id.';
   END IF;
 
-  -- c. Look up actor profile by auth.uid(). Raise if actor's company differs from OLD.company_id
   SELECT p.role, p.company_id INTO v_actor_role, v_actor_company
   FROM public.user_profiles AS p
   WHERE p.user_id = auth.uid() AND p.status = 'active' LIMIT 1;
@@ -477,7 +484,6 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: Actor company mismatch.';
   END IF;
 
-  -- d. If actor is not an Owner / Administrator: they may update only their own row, and may NOT change role or status
   IF v_actor_role <> 'Owner / Administrator' THEN
     IF OLD.user_id IS DISTINCT FROM auth.uid() THEN
       RAISE EXCEPTION 'Unauthorized: Non-admin can only update their own profile.';
@@ -487,14 +493,12 @@ BEGIN
     END IF;
   END IF;
 
-  -- e. If actor is an Owner / Administrator: they may update other users in same company, but may NOT change their own role or status (prevents lockout)
   IF v_actor_role = 'Owner / Administrator' AND OLD.user_id = auth.uid() THEN
     IF NEW.role IS DISTINCT FROM OLD.role OR NEW.status IS DISTINCT FROM OLD.status THEN
       RAISE EXCEPTION 'Unauthorized: Administrator cannot change their own role or status.';
     END IF;
   END IF;
 
-  -- f. Prevent demoting or deactivating the last active Owner in a company
   IF OLD.role = 'Owner / Administrator' AND (NEW.role <> 'Owner / Administrator' OR NEW.status <> 'active') THEN
     SELECT count(*) INTO v_active_owners_count
     FROM public.user_profiles
@@ -521,6 +525,68 @@ REVOKE ALL ON FUNCTION public.guard_profile_update() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.guard_profile_update() TO authenticated, service_role;
 
 -- =========================================================================
+-- DELIVERY DRIVER UPDATE GUARD TRIGGER (Restricts Driver column updates & transitions)
+-- =========================================================================
+CREATE OR REPLACE FUNCTION public.guard_delivery_update()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_role TEXT;
+  v_driver_name TEXT;
+  v_valid_statuses TEXT[];
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT p.role, p.name INTO v_role, v_driver_name
+  FROM public.user_profiles AS p
+  WHERE p.user_id = auth.uid() AND p.status = 'active' LIMIT 1;
+
+  -- If user is a Delivery Driver
+  IF v_role = 'Delivery Driver' THEN
+    -- Ensure delivery is assigned to this driver
+    IF OLD.assigned_staff IS DISTINCT FROM v_driver_name THEN
+      RAISE EXCEPTION 'Unauthorized: Delivery is not assigned to this driver.';
+    END IF;
+
+    -- Drivers cannot change core delivery metadata (customer, address, items, order ref, etc.)
+    IF NEW.company_id IS DISTINCT FROM OLD.company_id
+       OR NEW.delivery_number IS DISTINCT FROM OLD.delivery_number
+       OR NEW.sales_order_id IS DISTINCT FROM OLD.sales_order_id
+       OR NEW.sales_order_number IS DISTINCT FROM OLD.sales_order_number
+       OR NEW.customer_id IS DISTINCT FROM OLD.customer_id
+       OR NEW.customer_name IS DISTINCT FROM OLD.customer_name
+       OR NEW.customer_phone IS DISTINCT FROM OLD.customer_phone
+       OR NEW.delivery_address IS DISTINCT FROM OLD.delivery_address
+       OR NEW.scheduled_date IS DISTINCT FROM OLD.scheduled_date
+       OR NEW.assigned_staff IS DISTINCT FROM OLD.assigned_staff
+       OR NEW.items IS DISTINCT FROM OLD.items THEN
+      RAISE EXCEPTION 'Unauthorized: Delivery Drivers can only update delivery status, recipient name, POD reference, notes, and history.';
+    END IF;
+
+    -- Validate allowed status transitions
+    v_valid_statuses := ARRAY['Pending', 'Scheduled', 'Preparing', 'Dispatched', 'In Transit', 'Delivered', 'Failed', 'Cancelled', 'scheduled', 'delivered'];
+    IF NEW.status = ANY(v_valid_statuses) = false THEN
+      RAISE EXCEPTION 'Invalid delivery status transition.';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER 
+   SET search_path = public, pg_temp 
+   SET row_security = off;
+
+DROP TRIGGER IF EXISTS trg_guard_delivery_update ON public.deliveries;
+CREATE TRIGGER trg_guard_delivery_update
+  BEFORE UPDATE ON public.deliveries
+  FOR EACH ROW
+  EXECUTE FUNCTION public.guard_delivery_update();
+
+REVOKE ALL ON FUNCTION public.guard_delivery_update() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.guard_delivery_update() TO authenticated, service_role;
+
+-- =========================================================================
 -- APPEND-ONLY GENERAL LEDGER TRIGGER FUNCTION
 -- =========================================================================
 CREATE OR REPLACE FUNCTION public.guard_gl_append_only()
@@ -540,6 +606,96 @@ CREATE TRIGGER trg_gl_append_only
 
 REVOKE ALL ON FUNCTION public.guard_gl_append_only() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.guard_gl_append_only() TO authenticated, service_role;
+
+-- =========================================================================
+-- SECURE JOURNAL POSTING RPC FUNCTION (Validates debit == credit and computes running balance)
+-- =========================================================================
+CREATE OR REPLACE FUNCTION public.post_journal_voucher(
+  p_date DATE,
+  p_voucher_ref TEXT,
+  p_memo TEXT,
+  p_lines JSONB -- Array of objects: [{ "account_code": "...", "account_name": "...", "debit": 0, "credit": 0 }]
+)
+RETURNS VOID AS $$
+DECLARE
+  v_company_id UUID;
+  v_role TEXT;
+  v_line JSONB;
+  v_debit NUMERIC := 0;
+  v_credit NUMERIC := 0;
+  v_line_debit NUMERIC;
+  v_line_credit NUMERIC;
+  v_last_balance NUMERIC;
+  v_new_balance NUMERIC;
+BEGIN
+  v_company_id := public.get_auth_company_id();
+  v_role := public.get_auth_role();
+
+  IF v_company_id IS NULL THEN
+    RAISE EXCEPTION 'Unauthorized: User does not belong to an active company.';
+  END IF;
+
+  IF v_role NOT IN ('Owner / Administrator', 'Accountant') THEN
+    RAISE EXCEPTION 'Unauthorized: Only Owner/Administrator and Accountant roles can post journal vouchers.';
+  END IF;
+
+  IF jsonb_array_length(p_lines) = 0 THEN
+    RAISE EXCEPTION 'Voucher must contain at least one line item.';
+  END IF;
+
+  -- Validate total debits equal total credits
+  FOR v_line IN SELECT * FROM jsonb_array_elements(p_lines)
+  LOOP
+    v_line_debit := COALESCE((v_line->>'debit')::NUMERIC, 0);
+    v_line_credit := COALESCE((v_line->>'credit')::NUMERIC, 0);
+
+    IF v_line_debit < 0 OR v_line_credit < 0 THEN
+      RAISE EXCEPTION 'Debit and credit amounts cannot be negative.';
+    END IF;
+
+    IF v_line_debit > 0 AND v_line_credit > 0 THEN
+      RAISE EXCEPTION 'A single journal line cannot have both debit and credit amounts greater than zero.';
+    END IF;
+
+    v_debit := v_debit + v_line_debit;
+    v_credit := v_credit + v_line_credit;
+  END LOOP;
+
+  IF ABS(v_debit - v_credit) > 0.001 THEN
+    RAISE EXCEPTION 'Unbalanced journal voucher: Total debits (%) must equal total credits (%).', v_debit, v_credit;
+  END IF;
+
+  -- Post each line and calculate running balance server-side per account
+  FOR v_line IN SELECT * FROM jsonb_array_elements(p_lines)
+  LOOP
+    v_line_debit := COALESCE((v_line->>'debit')::NUMERIC, 0);
+    v_line_credit := COALESCE((v_line->>'credit')::NUMERIC, 0);
+
+    -- Get last running balance for this account in this company
+    SELECT running_balance INTO v_last_balance
+    FROM public.general_ledger
+    WHERE company_id = v_company_id AND account_code = (v_line->>'account_code')
+    ORDER BY date DESC, created_at DESC LIMIT 1;
+
+    v_last_balance := COALESCE(v_last_balance, 0);
+    v_new_balance := v_last_balance + v_line_debit - v_line_credit;
+
+    INSERT INTO public.general_ledger (
+      company_id, date, voucher_ref, account_code, account_name, memo, debit, credit, running_balance, status
+    ) VALUES (
+      v_company_id, p_date, p_voucher_ref, 
+      (v_line->>'account_code'), 
+      (v_line->>'account_name'), 
+      p_memo, v_line_debit, v_line_credit, v_new_balance, 'posted'
+    );
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER 
+   SET search_path = public, pg_temp 
+   SET row_security = off;
+
+REVOKE ALL ON FUNCTION public.post_journal_voucher(DATE, TEXT, TEXT, JSONB) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.post_journal_voucher(DATE, TEXT, TEXT, JSONB) TO authenticated, service_role;
 
 -- =========================================================================
 -- SECURE ONBOARDING RPC FUNCTION (Atomic First-Admin Registration)
@@ -623,7 +779,7 @@ CREATE POLICY user_profiles_insert ON public.user_profiles FOR INSERT WITH CHECK
 CREATE POLICY user_profiles_update ON public.user_profiles FOR UPDATE USING (company_id = public.get_auth_company_id() AND (user_id = auth.uid() OR public.is_company_admin())) WITH CHECK (company_id = public.get_auth_company_id());
 CREATE POLICY user_profiles_delete ON public.user_profiles FOR DELETE USING (false);
 
--- 3. PRODUCT CATEGORIES (Owner, Manager, Storekeeper write; Salesperson/Accountant read/none)
+-- 3. PRODUCT CATEGORIES (Owner, Manager, Storekeeper write; Salesperson/Accountant read)
 CREATE POLICY pc_select ON public.product_categories FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper', 'Salesperson', 'Accountant'));
 CREATE POLICY pc_insert ON public.product_categories FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper'));
 CREATE POLICY pc_update ON public.product_categories FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Storekeeper')) WITH CHECK (company_id = public.get_auth_company_id());
@@ -683,10 +839,20 @@ CREATE POLICY inv_insert ON public.sales_invoices FOR INSERT WITH CHECK (company
 CREATE POLICY inv_update ON public.sales_invoices FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Salesperson')) WITH CHECK (company_id = public.get_auth_company_id());
 CREATE POLICY inv_delete ON public.sales_invoices FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
 
--- 13. DELIVERIES (Owner, Manager write; Driver can update specific delivery columns; Accountant read)
-CREATE POLICY del_select ON public.deliveries FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Delivery Driver', 'Accountant'));
+-- 13. DELIVERIES (Owner, Manager write; Driver read/update assigned deliveries; Accountant read)
+CREATE POLICY del_select ON public.deliveries FOR SELECT USING (
+  company_id = public.get_auth_company_id() AND (
+    public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant')
+    OR (public.get_auth_role() = 'Delivery Driver' AND assigned_staff = public.get_auth_profile_name())
+  )
+);
 CREATE POLICY del_insert ON public.deliveries FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
-CREATE POLICY del_update ON public.deliveries FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Delivery Driver')) WITH CHECK (company_id = public.get_auth_company_id());
+CREATE POLICY del_update ON public.deliveries FOR UPDATE USING (
+  company_id = public.get_auth_company_id() AND (
+    public.get_auth_role() IN ('Owner / Administrator', 'Manager')
+    OR (public.get_auth_role() = 'Delivery Driver' AND assigned_staff = public.get_auth_profile_name())
+  )
+) WITH CHECK (company_id = public.get_auth_company_id());
 CREATE POLICY del_delete ON public.deliveries FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
 
 -- 14. PURCHASES (Owner, Manager write; Storekeeper read)
@@ -707,9 +873,9 @@ CREATE POLICY exp_insert ON public.expenses FOR INSERT WITH CHECK (company_id = 
 CREATE POLICY exp_update ON public.expenses FOR UPDATE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant')) WITH CHECK (company_id = public.get_auth_company_id());
 CREATE POLICY exp_delete ON public.expenses FOR DELETE USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager'));
 
--- 17. GENERAL LEDGER (Append-only; Accountant & Admin INSERT only; Read-only for Manager, Accountant, Admin)
+-- 17. GENERAL LEDGER (Append-only; Accountant & Admin via RPC only; Read-only for Manager, Accountant, Admin)
 CREATE POLICY gl_select ON public.general_ledger FOR SELECT USING (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Manager', 'Accountant'));
-CREATE POLICY gl_insert ON public.general_ledger FOR INSERT WITH CHECK (company_id = public.get_auth_company_id() AND public.get_auth_role() IN ('Owner / Administrator', 'Accountant'));
+CREATE POLICY gl_insert ON public.general_ledger FOR INSERT WITH CHECK (false); -- Restricted to post_journal_voucher() RPC
 CREATE POLICY gl_update ON public.general_ledger FOR UPDATE USING (false) WITH CHECK (false);
 CREATE POLICY gl_delete ON public.general_ledger FOR DELETE USING (false);
 
@@ -733,6 +899,12 @@ REVOKE ALL ON public.purchases FROM anon;
 REVOKE ALL ON public.grns FROM anon;
 REVOKE ALL ON public.expenses FROM anon;
 REVOKE ALL ON public.general_ledger FROM anon;
+
+-- =========================================================================
+-- EXPLICIT PRIVILEGES FOR AUTHENTICATED USERS
+-- =========================================================================
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;
 
 -- =========================================================================
 -- PERFORMANCE INDEXES (Non-unique composite lookups only)

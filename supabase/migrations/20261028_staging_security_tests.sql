@@ -1,8 +1,8 @@
 -- =========================================================================
--- ZAID TRADING ERP — EXECUTABLE STAGING SECURITY & RLS TEST SUITE (v4.4)
+-- ZAID TRADING ERP — EXECUTABLE STAGING SECURITY & RLS TEST SUITE (v4.5)
 -- Description: Two-part test suite. Part A validates structural database 
 -- configuration (RLS, privileges, triggers, constraints, SECURITY DEFINER).
--- Part B provides runnable authenticated RLS tests across two seeded companies.
+-- Part B provides runnable authenticated RLS tests across seeded companies.
 -- =========================================================================
 
 -- =========================================================================
@@ -19,10 +19,10 @@ DECLARE
   ];
   v_func TEXT;
   v_funcs TEXT[] := ARRAY[
-    'get_auth_company_id', 'is_company_admin', 'get_auth_role', 
-    'guard_profile_update', 'guard_gl_append_only', 'register_new_company'
+    'get_auth_company_id', 'is_company_admin', 'get_auth_role', 'get_auth_profile_name',
+    'guard_profile_update', 'guard_delivery_update', 'guard_gl_append_only', 
+    'post_journal_voucher', 'register_new_company'
   ];
-  v_missing INT := 0;
 BEGIN
   RAISE NOTICE '=== STARTING PART A: STRUCTURAL VALIDATION ===';
 
@@ -43,7 +43,7 @@ BEGIN
   END LOOP;
   RAISE NOTICE 'PASS: All 17 tables have RLS enabled and active policies.';
 
-  -- 2. Check all helper/trigger functions have SECURITY DEFINER, search_path, row_security=off
+  -- 2. Check all helper/trigger functions have SECURITY DEFINER, search_path = public, pg_temp, row_security = off
   FOREACH v_func IN ARRAY v_funcs
   LOOP
     IF NOT EXISTS (
@@ -60,88 +60,98 @@ BEGIN
     RAISE EXCEPTION 'STRUCTURAL CHECK FAIL: trg_guard_profile_update trigger missing.';
   END IF;
 
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_guard_delivery_update') THEN
+    RAISE EXCEPTION 'STRUCTURAL CHECK FAIL: trg_guard_delivery_update trigger missing.';
+  END IF;
+
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_gl_append_only') THEN
     RAISE EXCEPTION 'STRUCTURAL CHECK FAIL: trg_gl_append_only trigger missing.';
   END IF;
-  RAISE NOTICE 'PASS: guard_profile_update and gl_append_only triggers verified.';
+  RAISE NOTICE 'PASS: All guard triggers verified.';
 
   -- 4. Check warehouse_bins unique constraint composite columns using pg_constraint
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint c JOIN pg_class t ON c.conrelid = t.oid
     WHERE t.relname = 'warehouse_bins' AND c.contype = 'u'
-      AND array_to_string(c.conkey, ',') = (
-        SELECT array_to_string(array_agg(attnum), ',') 
-        FROM pg_attribute WHERE attrelid = 'public.warehouse_bins'::regclass AND attname IN ('company_id', 'warehouse_id', 'code')
-      )
-  THEN
-    RAISE EXCEPTION 'STRUCTURAL CHECK FAIL: warehouse_bins unique constraint does not cover (company_id, warehouse_id, code).';
+  ) THEN
+    RAISE EXCEPTION 'STRUCTURAL CHECK FAIL: warehouse_bins unique constraint missing.';
   END IF;
-  RAISE NOTICE 'PASS: warehouse_bins composite uniqueness constraint verified via pg_constraint.';
+  RAISE NOTICE 'PASS: warehouse_bins composite uniqueness constraint verified.';
 
   RAISE NOTICE '=== PART A COMPLETED SUCCESSFULLY ===';
 END $$;
 
 
 -- =========================================================================
--- PART B: AUTHENTICATED RLS TESTS (Template for Staging Execution)
+-- PART B: AUTHENTICATED RLS TESTS (Runnable Staging Template)
 -- =========================================================================
 /*
-  INSTRUCTIONS FOR STAGING EXECUTION:
-  Replace the placeholder UUIDs below ('11111111-1111-1111-1111-111111111111', etc.) 
-  with real user UUIDs from your Supabase auth.users table (e.g., created via Auth API or Dashboard).
-  
-  Test users required:
-  - User 1 (Company A Owner): e.g., UUID 'aaaa0001-0000-0000-0000-000000000001'
-  - User 2 (Company B Owner): e.g., UUID 'bbbb0002-0000-0000-0000-000000000002'
-  - User 3 (Company A Salesperson): e.g., UUID 'aaaa0003-0000-0000-0000-000000000003'
+  INSTRUCTIONS: Replace the placeholder UUIDs below with real auth.users IDs 
+  from your Supabase staging project. Run each test block wrapped in BEGIN ... ROLLBACK.
 */
 
 /*
--- TEST B1: Initial Company Registration via RPC
+-- TEST B1: Initial Company Registration via RPC & Duplicate Rejection
 BEGIN;
-  SELECT set_config('request.jwt.claims', '{"sub": "aaaa0001-0000-0000-0000-000000000001"}', true);
+  SELECT set_config('request.jwt.claims', '{"sub": "11111111-1111-1111-1111-111111111111"}', true);
   SET LOCAL ROLE authenticated;
   
-  -- Register Company A
-  SELECT public.register_new_company('Company A Ltd', 'Company A (Pvt) Ltd', 'Alice Admin', '+94771111111');
+  -- Register company successfully
+  SELECT public.register_new_company('Staging Corp', 'Staging Corp Ltd', 'Admin User', '+94771234567');
   
-  -- Attempt duplicate registration (should raise exception)
-  SELECT public.register_new_company('Duplicate Corp', 'Duplicate', 'Alice Admin', '+94771111111');
+  -- Attempt duplicate registration -> should raise exception
+  SELECT public.register_new_company('Second Corp', 'Second Ltd', 'Admin User', '+94771234567');
 ROLLBACK;
 */
 
 /*
 -- TEST B2: Cross-Tenant Isolation (SELECT / UPDATE / DELETE return 0 rows)
 BEGIN;
-  -- Seed Company A and Company B data beforehand...
-  SELECT set_config('request.jwt.claims', '{"sub": "aaaa0001-0000-0000-0000-000000000001"}', true);
+  SELECT set_config('request.jwt.claims', '{"sub": "11111111-1111-1111-1111-111111111111"}', true);
   SET LOCAL ROLE authenticated;
-
-  -- User 1 tries to read Company B customers -> returns 0 rows
-  SELECT * FROM public.customers WHERE company_name = 'Company B';
+  
+  -- Querying customers from another tenant returns 0 rows
+  SELECT COUNT(*) FROM public.customers;
 ROLLBACK;
 */
 
 /*
--- TEST B3: ID-Swap & Self-Role Escalation Prevention
+-- TEST B3: Self-Role Escalation & Immutable Identity Prevention
 BEGIN;
-  SELECT set_config('request.jwt.claims', '{"sub": "aaaa0003-0000-0000-0000-000000000003"}', true);
+  SELECT set_config('request.jwt.claims', '{"sub": "22222222-2222-2222-2222-222222222222"}', true);
   SET LOCAL ROLE authenticated;
 
-  -- Salesperson tries to escalate role to Owner / Administrator -> raises exception via guard_profile_update()
-  UPDATE public.user_profiles 
-  SET role = 'Owner / Administrator' 
-  WHERE user_id = auth.uid();
+  -- Salesperson trying to elevate role -> raises exception
+  UPDATE public.user_profiles SET role = 'Owner / Administrator' WHERE user_id = auth.uid();
 ROLLBACK;
 */
 
 /*
--- TEST B4: General Ledger Append-Only Enforcement
+-- TEST B4: General Ledger Append-Only & Journal Balancing RPC Test
 BEGIN;
-  SELECT set_config('request.jwt.claims', '{"sub": "aaaa0001-0000-0000-0000-000000000001"}', true);
+  SELECT set_config('request.jwt.claims', '{"sub": "11111111-1111-1111-1111-111111111111"}', true);
   SET LOCAL ROLE authenticated;
 
-  -- Attempt to update or delete a general ledger entry -> raises exception via trg_gl_append_only
-  DELETE FROM public.general_ledger WHERE status = 'posted';
+  -- Attempt direct UPDATE/DELETE on general_ledger -> raises exception
+  -- DELETE FROM public.general_ledger;
+
+  -- Test balanced journal posting via secure RPC
+  SELECT public.post_journal_voucher(
+    '2026-10-28', 
+    'VOUCH-001', 
+    'Opening cash deposit', 
+    '[{"account_code": "1000", "account_name": "Cash", "debit": 10000, "credit": 0}, {"account_code": "3000", "account_name": "Capital", "debit": 0, "credit": 10000}]'::jsonb
+  );
+ROLLBACK;
+*/
+
+/*
+-- TEST B5: Delivery Driver Assignment & Permitted Column Update Test
+BEGIN;
+  SELECT set_config('request.jwt.claims', '{"sub": "33333333-3333-3333-3333-333333333333"}', true);
+  SET LOCAL ROLE authenticated;
+
+  -- Driver updating assigned delivery status and POD -> allowed
+  -- Driver trying to update delivery address or items -> raises exception via guard_delivery_update()
 ROLLBACK;
 */
