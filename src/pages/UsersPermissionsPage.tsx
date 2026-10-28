@@ -1,79 +1,59 @@
 import React, { useState } from 'react';
-import { Plus, Search, ShieldCheck, UserCheck, Key, Lock, Check, X } from 'lucide-react';
+import { Plus, Search, ShieldCheck, UserCheck, Key, Lock, Check, X, Edit2, UserX } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Table, Column } from '../components/ui/Table';
 import { useToast } from '../context/ToastContext';
+import { useUser } from '../context/UserContext';
 import { UserProfile } from '../types';
+import { InviteUserModal } from '../components/modals/InviteUserModal';
+import { EditUserModal } from '../components/modals/EditUserModal';
 
 interface UsersPermissionsPageProps {
-  currentUser: UserProfile;
+  currentUser?: UserProfile;
 }
 
-interface TeamMember {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  status: 'active' | 'suspended';
-  lastActive: string;
-  assignedWarehouse: string;
-}
-
-export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = ({
-  currentUser,
-}) => {
+export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = () => {
   const { showToast } = useToast();
+  const { users, currentUser, isSuperAdmin } = useUser();
   const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'audit'>('users');
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
-  // Initial authorized staff for Zaid Trading
-  const usersList: TeamMember[] = [
-    {
-      id: '1',
-      name: 'Rashid Al-Zaid',
-      email: 'zaidtrading.info@gmail.com',
-      role: 'Owner / Administrator',
-      status: 'active',
-      lastActive: 'Active Now',
-      assignedWarehouse: 'All Locations (Full Access)',
-    },
-    {
-      id: '2',
-      name: 'Tariq Mansoor',
-      email: 'tariq.m@zaidtrading.com',
-      role: 'Storekeeper',
-      status: 'active',
-      lastActive: '2h ago',
-      assignedWarehouse: 'Central Riyadh Hub',
-    },
-    {
-      id: '3',
-      name: 'Fahad Al-Harbi',
-      email: 'fahad.h@zaidtrading.com',
-      role: 'Delivery Driver',
-      status: 'active',
-      lastActive: '34m ago',
-      assignedWarehouse: 'Van Fleet Unit 01',
-    },
-    {
-      id: '4',
-      name: 'Sarah Nabil',
-      email: 'sarah.n@zaidtrading.com',
-      role: 'Accountant',
-      status: 'active',
-      lastActive: '1d ago',
-      assignedWarehouse: 'Corporate Head Office',
-    },
-  ];
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [selectedUserToEdit, setSelectedUserToEdit] = useState<UserProfile | null>(null);
 
-  const columns: Column<TeamMember>[] = [
+  const filteredUsers = users.filter((u) => {
+    const matchesSearch =
+      u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.role.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesStatus = statusFilter === 'all' || u.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const columns: Column<UserProfile>[] = [
     {
       key: 'name',
       header: 'NAME & CREDENTIALS',
       render: (r) => (
-        <div className="flex flex-col">
-          <span className="font-semibold text-slate-900 dark:text-neutral-100">{r.name}</span>
-          <span className="text-[11px] text-slate-400">{r.email}</span>
+        <div className="flex items-center gap-2.5">
+          <img
+            src={r.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80'}
+            alt={r.name}
+            className="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-neutral-700 shrink-0"
+          />
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-slate-900 dark:text-neutral-100 truncate">{r.name}</span>
+              {r.id === currentUser.id && (
+                <span className="text-[10px] bg-[#167a53]/15 text-[#167a53] dark:text-[#34d399] font-bold px-1.5 py-0.2 rounded">
+                  YOU
+                </span>
+              )}
+            </div>
+            <span className="text-[11px] text-slate-400 truncate">{r.email}</span>
+          </div>
         </div>
       ),
     },
@@ -82,13 +62,29 @@ export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = ({
       header: 'ERP ROLE',
       render: (r) => (
         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-          <ShieldCheck className="w-3.5 h-3.5" />
+          <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
           <span>{r.role}</span>
         </span>
       ),
     },
-    { key: 'assignedWarehouse', header: 'SCOPE / WAREHOUSE' },
-    { key: 'lastActive', header: 'LAST SESSION' },
+    {
+      key: 'assignedWarehouse',
+      header: 'SCOPE / WAREHOUSE',
+      render: (r) => (
+        <span className="text-xs text-slate-600 dark:text-neutral-300">
+          {r.assignedWarehouse || 'Colombo Central Distribution Hub'}
+        </span>
+      ),
+    },
+    {
+      key: 'lastActive',
+      header: 'LAST SESSION',
+      render: (r) => (
+        <span className="text-xs font-mono text-slate-500 dark:text-neutral-400">
+          {r.lastActive || 'Active'}
+        </span>
+      ),
+    },
     {
       key: 'status',
       header: 'STATUS',
@@ -98,11 +94,27 @@ export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = ({
           className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${
             r.status === 'active'
               ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-              : 'bg-rose-50 text-rose-700'
+              : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
           }`}
         >
           {r.status.toUpperCase()}
         </span>
+      ),
+    },
+    {
+      key: 'id',
+      header: 'ACTION',
+      align: 'right',
+      render: (r) => (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setSelectedUserToEdit(r)}
+          disabled={!isSuperAdmin && r.id !== currentUser.id}
+          leftIcon={<Edit2 className="w-3 h-3" />}
+        >
+          Manage
+        </Button>
       ),
     },
   ];
@@ -134,7 +146,8 @@ export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = ({
         <Button
           variant="primary"
           size="sm"
-          onClick={() => showToast('Invite User', 'Team member invitation flow initialized', 'info')}
+          onClick={() => setIsInviteOpen(true)}
+          disabled={!isSuperAdmin}
           leftIcon={<Plus className="w-4 h-4" />}
         >
           Invite Team Member
@@ -143,7 +156,7 @@ export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = ({
 
       <div className="flex border-b border-slate-200 dark:border-neutral-800 space-x-6 text-xs font-semibold overflow-x-auto pb-px">
         {[
-          { id: 'users', label: 'Company Members (4)' },
+          { id: 'users', label: `Company Members (${users.length})` },
           { id: 'roles', label: 'Role Permissions Matrix' },
           { id: 'audit', label: 'Session & Access Log' },
         ].map((tab) => (
@@ -164,26 +177,63 @@ export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = ({
 
       {activeTab === 'users' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white dark:bg-[#181f1b] border border-slate-200 dark:border-neutral-800">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-white dark:bg-[#181f1b] border border-slate-200 dark:border-neutral-800">
             <div className="relative w-full sm:w-80">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
-                placeholder="Search staff by name or email..."
+                placeholder="Search staff by name, email, or role..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-50 dark:bg-[#151b18] border border-slate-200 dark:border-neutral-700 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-900 dark:text-neutral-100 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-[#167a53]"
               />
             </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="text-xs bg-slate-50 dark:bg-[#151b18] border border-slate-200 dark:border-neutral-700 rounded-lg px-3 py-1.5 text-slate-700 dark:text-neutral-300 focus:outline-none"
+              >
+                <option value="all">All Account Statuses</option>
+                <option value="active">Active Staff Only</option>
+                <option value="inactive">Suspended Accounts</option>
+              </select>
+            </div>
           </div>
 
           <Table
             columns={columns}
-            data={usersList}
+            data={filteredUsers}
             keyExtractor={(row) => row.id}
+            emptyState={
+              <div className="py-12 flex flex-col items-center justify-center text-center">
+                <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-neutral-800 text-slate-500 dark:text-neutral-400 flex items-center justify-center mb-3">
+                  <UserCheck className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-neutral-100">
+                  No matching staff members found
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-neutral-400 max-w-sm mt-1 leading-relaxed">
+                  Try adjusting your search query or status filter to locate authorized users.
+                </p>
+              </div>
+            }
           />
         </div>
       )}
+
+      {/* Modals */}
+      <InviteUserModal
+        isOpen={isInviteOpen}
+        onClose={() => setIsInviteOpen(false)}
+      />
+
+      <EditUserModal
+        isOpen={Boolean(selectedUserToEdit)}
+        onClose={() => setSelectedUserToEdit(null)}
+        user={selectedUserToEdit}
+      />
 
       {activeTab === 'roles' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

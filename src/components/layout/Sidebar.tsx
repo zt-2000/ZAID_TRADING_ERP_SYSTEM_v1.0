@@ -16,7 +16,7 @@ import {
   ChevronRight,
   ChevronsUpDown,
 } from 'lucide-react';
-import { NavigationSection, UserProfile } from '../../types';
+import { NavigationSection, UserProfile, CompanySettings } from '../../types';
 
 interface SidebarProps {
   currentSection: NavigationSection;
@@ -24,6 +24,7 @@ interface SidebarProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   currentUser: UserProfile;
+  companySettings?: CompanySettings;
   onOpenUserMenu: () => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
@@ -46,10 +47,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCollapsed,
   onToggleCollapse,
   currentUser,
+  companySettings,
   onOpenUserMenu,
   isMobileOpen = false,
   onCloseMobile,
 }) => {
+  const companyName = companySettings?.companyName || 'Zaid Trading';
+  const logoUrl = companySettings?.logoUrl;
+
   const navGroups: NavGroup[] = [
     {
       groupTitle: 'CORE',
@@ -96,13 +101,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <div className="flex flex-col h-full select-none">
       {/* Brand Header */}
       <div className={`flex items-center gap-3 px-5 py-4 border-b border-slate-200/80 dark:border-neutral-800/80 ${isCollapsed ? 'justify-center px-3' : ''}`}>
-        <div className="w-8 h-8 rounded-lg bg-[#167a53] flex items-center justify-center text-white font-bold text-lg shadow-sm shadow-[#167a53]/25 shrink-0">
-          Z
-        </div>
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt={companyName}
+            className={`object-contain shrink-0 ${isCollapsed ? 'w-8 h-8 rounded-lg' : 'h-8 max-w-[48px]'}`}
+          />
+        ) : (
+          <div className="w-8 h-8 rounded-lg bg-[#167a53] flex items-center justify-center text-white font-bold text-lg shadow-sm shadow-[#167a53]/25 shrink-0">
+            {companyName.charAt(0) || 'Z'}
+          </div>
+        )}
         {!isCollapsed && (
           <div className="min-w-0">
             <h1 className="text-sm font-bold text-slate-900 dark:text-neutral-100 tracking-tight leading-tight truncate">
-              Zaid Trading
+              {companyName}
             </h1>
             <p className="text-[10px] font-semibold tracking-wider text-slate-500 dark:text-neutral-400 uppercase">
               ERP SYSTEM

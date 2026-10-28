@@ -3,7 +3,9 @@ import { Dialog } from '../ui/Dialog';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
+import { useTransactions } from '../../context/TransactionContext';
 import { useToast } from '../../context/ToastContext';
+import { formatCurrency } from '../../utils/formatters';
 import { Plus, Trash2 } from 'lucide-react';
 
 interface NewPurchaseModalProps {
@@ -15,8 +17,9 @@ interface NewPurchaseModalProps {
 export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
   isOpen,
   onClose,
-  currencySymbol = '$',
+  currencySymbol = 'Rs.',
 }) => {
+  const { recordPurchase } = useTransactions();
   const { showToast } = useToast();
   const [supplierName, setSupplierName] = useState('');
   const [supplierInvoiceRef, setSupplierInvoiceRef] = useState('');
@@ -63,17 +66,27 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
 
     setIsSubmitting(true);
     setTimeout(() => {
+      const result = recordPurchase({
+        supplierName: supplierName.trim(),
+        supplierReference: supplierInvoiceRef.trim() || undefined,
+        warehouse,
+        paymentTerms,
+        totalCost,
+        itemsCount: items.length,
+      });
+
       setIsSubmitting(false);
       showToast(
         'Purchase Order Generated',
-        `Purchase order PO-001 for ${supplierName} (${currencySymbol}${totalCost.toFixed(2)}) created successfully.`,
+        `Purchase order ${result.record?.poNumber} for ${supplierName} (${formatCurrency(totalCost, currencySymbol)}) created successfully.`,
         'success'
       );
       onClose();
+
       setSupplierName('');
       setSupplierInvoiceRef('');
       setItems([{ id: '1', sku: '', description: '', quantity: 10, unitCost: 0 }]);
-    }, 600);
+    }, 400);
   };
 
   return (
@@ -98,10 +111,11 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Input
             label="Supplier Entity"
-            placeholder="e.g. Gulf Food Industries Ltd"
+            placeholder="e.g. Ceylon Spices Exporters Ltd"
             value={supplierName}
             onChange={(e) => setSupplierName(e.target.value)}
             required
+            autoFocus
           />
           <Input
             label="Supplier Reference / Proforma #"
@@ -118,9 +132,9 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             value={warehouse}
             onChange={(e) => setWarehouse(e.target.value)}
             options={[
-              { value: 'central_hub', label: 'Main Central Hub (Riyadh)' },
-              { value: 'dammam_facility', label: 'Dammam Port Depot' },
-              { value: 'jeddah_hub', label: 'Jeddah Distribution Center' },
+              { value: 'central_hub', label: 'Colombo Central Distribution Hub' },
+              { value: 'kandy_facility', label: 'Kandy Regional Depot' },
+              { value: 'galle_hub', label: 'Galle Distribution Depot' },
             ]}
           />
           <Select
@@ -184,7 +198,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
                     className="w-full bg-white dark:bg-[#1a211e] border border-slate-200 dark:border-neutral-700 rounded px-2.5 py-1.5 text-xs text-slate-900 dark:text-neutral-100 text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-[#167a53]"
                   />
                 </div>
-                <div className="w-24">
+                <div className="w-28">
                   <input
                     type="number"
                     step="0.01"
@@ -211,7 +225,7 @@ export const NewPurchaseModal: React.FC<NewPurchaseModalProps> = ({
             <div className="flex items-center gap-4 text-xs font-semibold text-slate-800 dark:text-neutral-200">
               <span>Total Estimated PO Value:</span>
               <span className="text-sm font-mono tabular-nums text-[#167a53] dark:text-[#34d399] font-bold">
-                {currencySymbol}{totalCost.toFixed(2)}
+                {formatCurrency(totalCost, currencySymbol)}
               </span>
             </div>
           </div>

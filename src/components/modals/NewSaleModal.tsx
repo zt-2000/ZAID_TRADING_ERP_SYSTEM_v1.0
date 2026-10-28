@@ -3,7 +3,9 @@ import { Dialog } from '../ui/Dialog';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
+import { useTransactions } from '../../context/TransactionContext';
 import { useToast } from '../../context/ToastContext';
+import { formatCurrency } from '../../utils/formatters';
 import { Plus, Trash2 } from 'lucide-react';
 
 interface NewSaleModalProps {
@@ -23,9 +25,11 @@ interface SaleLineItem {
 export const NewSaleModal: React.FC<NewSaleModalProps> = ({
   isOpen,
   onClose,
-  currencySymbol = '$',
+  currencySymbol = 'Rs.',
 }) => {
+  const { recordSale } = useTransactions();
   const { showToast } = useToast();
+
   const [customerName, setCustomerName] = useState('');
   const [customerCode, setCustomerCode] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('30_days');
@@ -82,18 +86,32 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
     setIsSubmitting(true);
     setTimeout(() => {
+      const result = recordSale({
+        customerName: customerName.trim(),
+        customerCode: customerCode.trim() || undefined,
+        paymentTerms,
+        warehouse,
+        subtotal,
+        taxTotal,
+        total: totalAmount,
+        itemsCount: items.length,
+        notes: notes.trim() || undefined,
+      });
+
       setIsSubmitting(false);
       showToast(
-        'Invoice Drafted',
-        `Sales invoice for ${customerName} (${currencySymbol}${totalAmount.toFixed(2)}) prepared for posting.`,
+        'Invoice Posted',
+        `Sales invoice ${result.record?.invoiceNumber} for ${customerName} (${formatCurrency(totalAmount, currencySymbol)}) posted to ledger.`,
         'success'
       );
       onClose();
+
       // Reset form
       setCustomerName('');
       setCustomerCode('');
+      setNotes('');
       setItems([{ id: '1', itemDescription: '', quantity: 1, unitPrice: 0, taxRate: 15 }]);
-    }, 600);
+    }, 400);
   };
 
   return (
@@ -118,10 +136,11 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Input
             label="Customer Name"
-            placeholder="e.g. Al-Madina Wholesale Supermarket"
+            placeholder="e.g. Colombo Super Centre / Al-Madina Wholesale"
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
             required
+            autoFocus
           />
           <Input
             label="Customer Account / Tax Code"
@@ -138,10 +157,10 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             value={paymentTerms}
             onChange={(e) => setPaymentTerms(e.target.value)}
             options={[
-              { value: 'immediate', label: 'Cash on Delivery (Immediate)' },
-              { value: '15_days', label: 'Net 15 Days' },
-              { value: '30_days', label: 'Net 30 Days' },
-              { value: '60_days', label: 'Net 60 Days' },
+              { value: 'immediate', label: 'Cash on Delivery / Immediate Settlement' },
+              { value: '15_days', label: 'Net 15 Days Credit' },
+              { value: '30_days', label: 'Net 30 Days Standard' },
+              { value: '60_days', label: 'Net 60 Days Distributor' },
             ]}
           />
           <Select
@@ -149,9 +168,9 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
             value={warehouse}
             onChange={(e) => setWarehouse(e.target.value)}
             options={[
-              { value: 'central_hub', label: 'Main Central Hub (Riyadh)' },
-              { value: 'van_01', label: 'Van Unit 01 - North Route' },
-              { value: 'van_02', label: 'Van Unit 02 - South Route' },
+              { value: 'central_hub', label: 'Colombo Central Distribution Hub' },
+              { value: 'van_01', label: 'Van Unit 01 — Western Province' },
+              { value: 'van_02', label: 'Van Unit 02 — Central Province' },
             ]}
           />
         </div>
@@ -195,7 +214,7 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     className="w-full bg-white dark:bg-[#1a211e] border border-slate-200 dark:border-neutral-700 rounded px-2.5 py-1.5 text-xs text-slate-900 dark:text-neutral-100 text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-[#167a53]"
                   />
                 </div>
-                <div className="w-24">
+                <div className="w-28">
                   <input
                     type="number"
                     step="0.01"
@@ -206,9 +225,8 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     className="w-full bg-white dark:bg-[#1a211e] border border-slate-200 dark:border-neutral-700 rounded px-2.5 py-1.5 text-xs text-slate-900 dark:text-neutral-100 text-right font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-[#167a53]"
                   />
                 </div>
-                <div className="w-24 text-right font-mono tabular-nums font-medium text-slate-700 dark:text-neutral-300">
-                  {currencySymbol}
-                  {(item.quantity * item.unitPrice).toFixed(2)}
+                <div className="w-28 text-right font-mono tabular-nums font-medium text-slate-700 dark:text-neutral-300">
+                  {formatCurrency(item.quantity * item.unitPrice, currencySymbol)}
                 </div>
                 <button
                   type="button"
@@ -223,19 +241,19 @@ export const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
 
           <div className="mt-3 flex justify-end">
-            <div className="w-64 space-y-1.5 text-xs">
+            <div className="w-72 space-y-1.5 text-xs">
               <div className="flex justify-between text-slate-500 dark:text-neutral-400">
                 <span>Subtotal:</span>
-                <span className="font-mono tabular-nums">{currencySymbol}{subtotal.toFixed(2)}</span>
+                <span className="font-mono tabular-nums">{formatCurrency(subtotal, currencySymbol)}</span>
               </div>
               <div className="flex justify-between text-slate-500 dark:text-neutral-400">
                 <span>Estimated Tax (15%):</span>
-                <span className="font-mono tabular-nums">{currencySymbol}{taxTotal.toFixed(2)}</span>
+                <span className="font-mono tabular-nums">{formatCurrency(taxTotal, currencySymbol)}</span>
               </div>
               <div className="flex justify-between text-sm font-semibold text-slate-900 dark:text-neutral-100 pt-1.5 border-t border-slate-200 dark:border-neutral-700">
                 <span>Total Due:</span>
                 <span className="font-mono tabular-nums text-[#167a53] dark:text-[#34d399] font-bold">
-                  {currencySymbol}{totalAmount.toFixed(2)}
+                  {formatCurrency(totalAmount, currencySymbol)}
                 </span>
               </div>
             </div>

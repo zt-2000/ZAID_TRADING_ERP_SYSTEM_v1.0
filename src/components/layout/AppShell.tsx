@@ -11,6 +11,13 @@ import { AddCustomerModal } from '../modals/AddCustomerModal';
 import { RecordExpenseModal } from '../modals/RecordExpenseModal';
 
 import { NavigationSection, UserProfile, CompanySettings } from '../../types';
+import { useUser } from '../../context/UserContext';
+import { MyProfileModal } from '../modals/MyProfileModal';
+import { EditProfileModal } from '../modals/EditProfileModal';
+import { AccountSecurityModal } from '../modals/AccountSecurityModal';
+import { ChangePasswordModal } from '../modals/ChangePasswordModal';
+import { UserPreferencesModal } from '../modals/UserPreferencesModal';
+import { SignOutConfirmModal } from '../modals/SignOutConfirmModal';
 import { DashboardPage } from '../../pages/DashboardPage';
 import { SalesPage } from '../../pages/SalesPage';
 import { PurchasingPage } from '../../pages/PurchasingPage';
@@ -33,6 +40,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   companySettings,
   onUpdateSettings,
 }) => {
+  const { currentUser, updateUser } = useUser();
   const [currentSection, setCurrentSection] = useState<NavigationSection>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -42,18 +50,16 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
+  // User Account Modals
+  const [isMyProfileOpen, setIsMyProfileOpen] = useState(false);
+  const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
+  const [isAccountSecurityOpen, setIsAccountSecurityOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [isSignOutOpen, setIsSignOutOpen] = useState(false);
+
   // Quick Action Modals
   const [activeQuickAction, setActiveQuickAction] = useState<string | null>(null);
-
-  // Current Operator User
-  const [currentUser, setCurrentUser] = useState<UserProfile>({
-    id: 'usr_zaid_01',
-    name: 'Rashid Al-Zaid',
-    email: 'zaidtrading.info@gmail.com',
-    role: 'Owner / Administrator',
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80',
-    status: 'active',
-  });
 
   // Keyboard shortcut listener: '[' to collapse sidebar, Ctrl+K for search
   useEffect(() => {
@@ -89,6 +95,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           <SalesPage
             onOpenNewSale={() => handleOpenQuickAction('sale')}
             currencySymbol={companySettings.currencySymbol}
+            companySettings={companySettings}
           />
         );
       case 'purchasing':
@@ -144,7 +151,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           />
         );
       case 'users':
-        return <UsersPermissionsPage currentUser={currentUser} />;
+        return <UsersPermissionsPage />;
       case 'settings':
         return (
           <SettingsPage
@@ -172,7 +179,8 @@ export const AppShell: React.FC<AppShellProps> = ({
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
         currentUser={currentUser}
-        onOpenUserMenu={() => setIsUserMenuOpen(true)}
+        companySettings={companySettings}
+        onOpenUserMenu={() => setIsMyProfileOpen(true)}
         isMobileOpen={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
       />
@@ -187,7 +195,12 @@ export const AppShell: React.FC<AppShellProps> = ({
           onOpenNotifications={() => setIsNotificationsOpen(true)}
           unreadNotificationsCount={1}
           currentUser={currentUser}
-          onOpenUserMenu={() => setIsUserMenuOpen(true)}
+          onOpenMyProfile={() => setIsMyProfileOpen(true)}
+          onOpenEditProfile={() => setIsEditProfileOpen(true)}
+          onOpenAccountSecurity={() => setIsAccountSecurityOpen(true)}
+          onOpenChangePassword={() => setIsChangePasswordOpen(true)}
+          onOpenPreferences={() => setIsPreferencesOpen(true)}
+          onOpenSignOut={() => setIsSignOutOpen(true)}
           onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
         />
 
@@ -207,7 +220,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           <div className="hidden sm:flex items-center gap-2 font-mono text-[10px] shrink-0">
             <span>SESSION ID: #ZD-98214-OPS</span>
             <span>•</span>
-            <span>SYSTEM UTC+03:00</span>
+            <span>SYSTEM UTC+05:30 (Asia/Colombo)</span>
           </div>
         </footer>
       </div>
@@ -225,11 +238,38 @@ export const AppShell: React.FC<AppShellProps> = ({
         onClose={() => setIsNotificationsOpen(false)}
       />
 
-      <UserMenuModal
-        isOpen={isUserMenuOpen}
-        onClose={() => setIsUserMenuOpen(false)}
-        currentUser={currentUser}
-        onUpdateRole={(newRole) => setCurrentUser((prev) => ({ ...prev, role: newRole }))}
+      {/* User Account & Security Modals */}
+      <MyProfileModal
+        isOpen={isMyProfileOpen}
+        onClose={() => setIsMyProfileOpen(false)}
+        onOpenEditProfile={() => setIsEditProfileOpen(true)}
+        onOpenAccountSecurity={() => setIsAccountSecurityOpen(true)}
+      />
+
+      <EditProfileModal
+        isOpen={isEditProfileOpen}
+        onClose={() => setIsEditProfileOpen(false)}
+      />
+
+      <AccountSecurityModal
+        isOpen={isAccountSecurityOpen}
+        onClose={() => setIsAccountSecurityOpen(false)}
+        onOpenChangePassword={() => setIsChangePasswordOpen(true)}
+      />
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
+
+      <UserPreferencesModal
+        isOpen={isPreferencesOpen}
+        onClose={() => setIsPreferencesOpen(false)}
+      />
+
+      <SignOutConfirmModal
+        isOpen={isSignOutOpen}
+        onClose={() => setIsSignOutOpen(false)}
       />
 
       {/* Quick Action Modals */}

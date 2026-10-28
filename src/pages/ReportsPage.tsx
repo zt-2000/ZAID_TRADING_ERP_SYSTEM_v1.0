@@ -8,7 +8,7 @@ interface ReportsPageProps {
 }
 
 export const ReportsPage: React.FC<ReportsPageProps> = ({
-  currencySymbol = '$',
+  currencySymbol = 'Rs.',
 }) => {
   const { showToast } = useToast();
   const [selectedCategory, setSelectedCategory] = useState<string>('all');

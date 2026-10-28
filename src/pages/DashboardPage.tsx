@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   RotateCw,
   Download,
@@ -18,7 +18,10 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
+import { useTransactions } from '../context/TransactionContext';
 import { useToast } from '../context/ToastContext';
+import { formatCurrency } from '../utils/formatters';
 
 interface DashboardPageProps {
   onOpenQuickAction: (action: string) => void;
@@ -28,20 +31,94 @@ interface DashboardPageProps {
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   onOpenQuickAction,
-  currencySymbol = '$',
+  currencySymbol = 'Rs.',
   onNavigateToModule,
 }) => {
   const { showToast } = useToast();
+  const { sales, purchases, expenses } = useTransactions();
+
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month' | 'custom'>('month');
   const [revenueRange, setRevenueRange] = useState('30d');
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Compute live KPI aggregates from real transactions
+  const totalSalesAmount = useMemo(() => {
+    return sales.reduce((sum, s) => sum + (s.total || 0), 0);
+  }, [sales]);
+
+  const totalReceivablesAmount = useMemo(() => {
+    return sales.reduce((sum, s) => sum + (s.balance || 0), 0);
+  }, [sales]);
+
+  const unpaidInvoicesCount = useMemo(() => {
+    return sales.filter((s) => s.balance > 0).length;
+  }, [sales]);
+
+  const totalPayablesAmount = useMemo(() => {
+    return purchases.reduce((sum, p) => sum + (p.totalCost || 0), 0);
+  }, [purchases]);
+
+  const totalExpensesAmount = useMemo(() => {
+    return expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+  }, [expenses]);
+
+  // Combined recent ledger transactions
+  const recentTransactions = useMemo(() => {
+    const list: {
+      id: string;
+      date: string;
+      reference: string;
+      type: string;
+      entity: string;
+      amount: number;
+      status: string;
+    }[] = [];
+
+    sales.forEach((s) => {
+      list.push({
+        id: s.id,
+        date: s.date,
+        reference: s.invoiceNumber,
+        type: 'Sale Invoice',
+        entity: s.customerName,
+        amount: s.total,
+        status: s.status,
+      });
+    });
+
+    expenses.forEach((e) => {
+      list.push({
+        id: e.id,
+        date: e.date,
+        reference: e.voucherNo,
+        type: 'Expense Voucher',
+        entity: e.payee,
+        amount: e.amount,
+        status: e.status,
+      });
+    });
+
+    purchases.forEach((p) => {
+      list.push({
+        id: p.id,
+        date: p.date,
+        reference: p.poNumber,
+        type: 'Purchase Order',
+        entity: p.supplierName,
+        amount: p.totalCost,
+        status: p.status,
+      });
+    });
+
+    return list.slice(0, 5);
+  }, [sales, expenses, purchases]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
     setTimeout(() => {
       setIsRefreshing(false);
       showToast('Dashboard Refreshed', 'Latest general ledger and inventory balances verified.', 'success');
-    }, 600);
+    }, 400);
   };
 
   const handleExport = () => {
@@ -71,7 +148,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <button
                 type="button"
                 onClick={() => setTimeRange('today')}
-                className={`px-3 py-1.5 rounded-md transition-colors ${
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
                   timeRange === 'today'
                     ? 'bg-white dark:bg-[#25312a] text-slate-900 dark:text-white shadow-xs font-semibold'
                     : 'hover:text-slate-900 dark:hover:text-neutral-200'
@@ -82,7 +159,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <button
                 type="button"
                 onClick={() => setTimeRange('week')}
-                className={`px-3 py-1.5 rounded-md transition-colors ${
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
                   timeRange === 'week'
                     ? 'bg-white dark:bg-[#25312a] text-slate-900 dark:text-white shadow-xs font-semibold'
                     : 'hover:text-slate-900 dark:hover:text-neutral-200'
@@ -93,7 +170,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <button
                 type="button"
                 onClick={() => setTimeRange('month')}
-                className={`px-3 py-1.5 rounded-md transition-colors ${
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
                   timeRange === 'month'
                     ? 'bg-white dark:bg-[#25312a] text-slate-900 dark:text-white shadow-xs font-semibold'
                     : 'hover:text-slate-900 dark:hover:text-neutral-200'
@@ -104,7 +181,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <button
                 type="button"
                 onClick={() => setTimeRange('custom')}
-                className={`px-3 py-1.5 rounded-md transition-colors ${
+                className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
                   timeRange === 'custom'
                     ? 'bg-white dark:bg-[#25312a] text-slate-900 dark:text-white shadow-xs font-semibold'
                     : 'hover:text-slate-900 dark:hover:text-neutral-200'
@@ -191,7 +268,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </Button>
       </div>
 
-      {/* 6 Metrics KPI Grid */}
+      {/* 6 Metrics KPI Grid with Real Totals */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         {/* Total Sales */}
         <div className="p-4 rounded-xl bg-white dark:bg-[#181f1b] border border-slate-200 dark:border-neutral-800 shadow-xs flex flex-col justify-between">
@@ -204,12 +281,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
           </div>
           <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100">
-              {currencySymbol}0.00
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100 truncate">
+              {formatCurrency(totalSalesAmount, currencySymbol)}
             </p>
-            <p className="text-[11px] text-slate-500 dark:text-neutral-400 mt-1 flex items-center gap-1">
-              <span>—</span>
-              <span>No prior period data</span>
+            <p className="text-[11px] text-slate-500 dark:text-neutral-400 mt-1">
+              {sales.length > 0 ? `${sales.length} invoices posted` : 'No prior period data'}
             </p>
           </div>
         </div>
@@ -225,11 +301,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
           </div>
           <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100">
-              {currencySymbol}0.00
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100 truncate">
+              {formatCurrency(totalReceivablesAmount, currencySymbol)}
             </p>
             <p className="text-[11px] text-slate-500 dark:text-neutral-400 mt-1">
-              0 unpaid invoices
+              {unpaidInvoicesCount} unpaid invoices
             </p>
           </div>
         </div>
@@ -245,11 +321,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
           </div>
           <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100">
-              {currencySymbol}0.00
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100 truncate">
+              {formatCurrency(totalPayablesAmount, currencySymbol)}
             </p>
             <p className="text-[11px] text-slate-500 dark:text-neutral-400 mt-1">
-              0 pending supplier bills
+              {purchases.length} supplier orders
             </p>
           </div>
         </div>
@@ -265,8 +341,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
           </div>
           <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100">
-              {currencySymbol}0.00
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100 truncate">
+              {formatCurrency(0, currencySymbol)}
             </p>
             <p className="text-[11px] text-slate-500 dark:text-neutral-400 mt-1">
               0 total SKUs in warehouse
@@ -285,7 +361,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
           </div>
           <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100">
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100">
               0 items
             </p>
             <p className="text-[11px] text-slate-500 dark:text-neutral-400 mt-1">
@@ -305,17 +381,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
           </div>
           <div className="mt-2">
-            <p className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100">
-              {currencySymbol}0.00
+            <p className="text-lg sm:text-xl font-bold font-mono tabular-nums text-slate-900 dark:text-neutral-100 truncate">
+              {formatCurrency(totalExpensesAmount, currencySymbol)}
             </p>
             <p className="text-[11px] text-slate-500 dark:text-neutral-400 mt-1">
-              0 recorded expenses this month
+              {expenses.length} vouchers recorded
             </p>
           </div>
         </div>
       </div>
 
-      {/* Sales & Revenue Overview (Large Card with Graph Grid & Empty State) */}
+      {/* Sales & Revenue Overview (Large Card with Graph Grid & Real/Empty State) */}
       <div className="rounded-xl bg-white dark:bg-[#181f1b] border border-slate-200 dark:border-neutral-800 shadow-xs overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-neutral-800">
           <div>
@@ -338,30 +414,62 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </select>
         </div>
 
-        {/* Background graph grid styling matching mockup */}
-        <div className="relative min-h-[300px] flex items-center justify-center p-6 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#26312a_1px,transparent_1px)] [background-size:24px_24px]">
-          {/* Centered empty state card matching screenshot */}
-          <div className="max-w-md w-full p-8 rounded-xl bg-white/95 dark:bg-[#181f1b]/95 border border-slate-200 dark:border-neutral-800 shadow-md text-center">
-            <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-[#167a53] dark:text-[#34d399] flex items-center justify-center mx-auto mb-3">
-              <TrendingUp className="w-6 h-6" />
+        {/* Background graph grid styling */}
+        <div className="relative min-h-[260px] flex items-center justify-center p-6 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#26312a_1px,transparent_1px)] [background-size:24px_24px]">
+          {sales.length > 0 ? (
+            <div className="w-full max-w-2xl bg-white/95 dark:bg-[#181f1b]/95 border border-slate-200 dark:border-neutral-800 rounded-xl p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-neutral-800 pb-2">
+                <span className="text-xs font-semibold text-slate-600 dark:text-neutral-400">
+                  Recorded Turnover
+                </span>
+                <span className="font-mono text-base font-bold text-[#167a53] dark:text-[#34d399]">
+                  {formatCurrency(totalSalesAmount, currencySymbol)}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#141a17]">
+                  <p className="text-[10px] text-slate-400 uppercase font-bold">Total Invoices</p>
+                  <p className="text-sm font-bold font-mono mt-0.5 text-slate-900 dark:text-neutral-100">
+                    {sales.length}
+                  </p>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#141a17]">
+                  <p className="text-[10px] text-slate-400 uppercase font-bold">Collected Turnover</p>
+                  <p className="text-sm font-bold font-mono mt-0.5 text-emerald-700 dark:text-emerald-400">
+                    {formatCurrency(totalSalesAmount - totalReceivablesAmount, currencySymbol)}
+                  </p>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-[#141a17]">
+                  <p className="text-[10px] text-slate-400 uppercase font-bold">Outstanding AR</p>
+                  <p className="text-sm font-bold font-mono mt-0.5 text-amber-700 dark:text-amber-400">
+                    {formatCurrency(totalReceivablesAmount, currencySymbol)}
+                  </p>
+                </div>
+              </div>
             </div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-neutral-100">
-              No sales recorded yet
-            </h3>
-            <p className="text-xs text-slate-600 dark:text-neutral-400 mt-1.5 leading-relaxed">
-              Your dashboard will show sales trends, daily performance, and revenue insights once you start recording transactions.
-            </p>
-            <div className="mt-5">
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => onOpenQuickAction('sale')}
-                leftIcon={<Plus className="w-4 h-4" />}
-              >
-                Create First Sale
-              </Button>
+          ) : (
+            <div className="max-w-md w-full p-8 rounded-xl bg-white/95 dark:bg-[#181f1b]/95 border border-slate-200 dark:border-neutral-800 shadow-md text-center">
+              <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-[#167a53] dark:text-[#34d399] flex items-center justify-center mx-auto mb-3">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-neutral-100">
+                No sales recorded yet
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-neutral-400 mt-1.5 leading-relaxed">
+                Your dashboard will show sales trends, daily performance, and revenue insights once you start recording transactions.
+              </p>
+              <div className="mt-5">
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => onOpenQuickAction('sale')}
+                  leftIcon={<Plus className="w-4 h-4" />}
+                >
+                  Create First Sale
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -381,9 +489,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 variant="outline"
                 size="sm"
                 leftIcon={<Filter className="w-3.5 h-3.5" />}
-                onClick={() => showToast('Filter', 'Filter transactions by date, customer, or document type', 'info')}
+                onClick={() => onNavigateToModule('finance')}
               >
-                Filter
+                View General Ledger
               </Button>
             </div>
 
@@ -397,28 +505,51 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <div className="text-right">STATUS</div>
             </div>
 
-            {/* Honest Empty State matching mockup */}
-            <div className="p-8 text-center flex flex-col items-center justify-center min-h-[200px]">
-              <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-neutral-800 text-slate-500 dark:text-neutral-400 flex items-center justify-center mb-2.5">
-                <FileText className="w-5 h-5" />
+            {recentTransactions.length > 0 ? (
+              <div className="divide-y divide-slate-100 dark:divide-neutral-800/60">
+                {recentTransactions.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="grid grid-cols-6 px-4 py-3 text-xs items-center hover:bg-slate-50/80 dark:hover:bg-[#1f2923]/60 transition-colors"
+                  >
+                    <div className="text-slate-500 dark:text-neutral-400 font-mono text-[11px]">{tx.date}</div>
+                    <div className="font-mono font-medium text-slate-900 dark:text-neutral-100 truncate">{tx.reference}</div>
+                    <div className="text-slate-600 dark:text-neutral-300 text-[11px] truncate">{tx.type}</div>
+                    <div className="text-slate-800 dark:text-neutral-200 truncate">{tx.entity}</div>
+                    <div className="text-right font-mono font-bold text-slate-900 dark:text-neutral-100">
+                      {formatCurrency(tx.amount, currencySymbol)}
+                    </div>
+                    <div className="text-right">
+                      <Badge variant="success" dot size="sm">
+                        {tx.status.toUpperCase()}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <h4 className="text-xs font-bold text-slate-900 dark:text-neutral-100">
-                No transactions to display
-              </h4>
-              <p className="text-[11px] text-slate-500 dark:text-neutral-400 mt-1 max-w-xs leading-relaxed">
-                Invoices, payments, and credit notes will appear here automatically.
-              </p>
-              <div className="mt-4">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => onOpenQuickAction('sale')}
-                  leftIcon={<Plus className="w-3.5 h-3.5" />}
-                >
-                  Record Transaction
-                </Button>
+            ) : (
+              <div className="p-8 text-center flex flex-col items-center justify-center min-h-[200px]">
+                <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-neutral-800 text-slate-500 dark:text-neutral-400 flex items-center justify-center mb-2.5">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-neutral-100">
+                  No transactions to display
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-neutral-400 mt-1 max-w-xs leading-relaxed">
+                  Invoices, payments, and credit notes will appear here automatically.
+                </p>
+                <div className="mt-4">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onOpenQuickAction('sale')}
+                    leftIcon={<Plus className="w-3.5 h-3.5" />}
+                  >
+                    Record Transaction
+                  </Button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 

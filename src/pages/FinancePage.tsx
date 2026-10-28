@@ -1,19 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Plus,
   Search,
   Download,
-  Landmark,
   BookOpen,
   Layers,
   FileText,
-  Wallet,
   CheckCircle2,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Table, Column } from '../components/ui/Table';
 import { Badge } from '../components/ui/Badge';
+import { NewJournalEntryModal } from '../components/modals/NewJournalEntryModal';
+import { useTransactions, GeneralLedgerEntry } from '../context/TransactionContext';
 import { useToast } from '../context/ToastContext';
+import { formatCurrency } from '../utils/formatters';
 
 interface FinancePageProps {
   currencySymbol?: string;
@@ -29,19 +30,6 @@ interface AccountRow {
   netBalance: number;
 }
 
-interface GeneralLedgerRow {
-  id: string;
-  date: string;
-  voucherRef: string;
-  accountCode: string;
-  accountName: string;
-  memo: string;
-  debit: number;
-  credit: number;
-  runningBalance: number;
-  status: 'posted' | 'reconciled';
-}
-
 interface CashBankAccountRow {
   code: string;
   name: string;
@@ -53,45 +41,123 @@ interface CashBankAccountRow {
 }
 
 export const FinancePage: React.FC<FinancePageProps> = ({
-  currencySymbol = '$',
+  currencySymbol = 'Rs.',
 }) => {
   const { showToast } = useToast();
+  const { glEntries } = useTransactions();
 
   // General Ledger View is the primary default tab and renders immediately on initial mount
   const [activeTab, setActiveTab] = useState<
     'ledger' | 'coa' | 'journals' | 'cash_bank' | 'reconciliation'
   >('ledger');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAccountFilter, setSelectedAccountFilter] = useState('all');
+  const [isJournalModalOpen, setIsJournalModalOpen] = useState(false);
 
-  // Honest production database starts with 0 unposted or fake transactions
-  const generalLedgerData: GeneralLedgerRow[] = [];
-  const journalVouchersData: any[] = [];
+  // Compute live account balances dynamically based on audited General Ledger entries
+  const accountsData: AccountRow[] = useMemo(() => {
+    const baseAccounts: AccountRow[] = [
+      { code: '1010', name: 'Central Warehouse Petty Cash Vault', type: 'Asset', category: 'Cash & Cash Equivalents', debit: 0, credit: 0, netBalance: 0 },
+      { code: '1020', name: 'Corporate Operating Bank Account', type: 'Asset', category: 'Cash & Cash Equivalents', debit: 0, credit: 0, netBalance: 0 },
+      { code: '1050', name: 'Trade Accounts Receivable', type: 'Asset', category: 'Current Assets', debit: 0, credit: 0, netBalance: 0 },
+      { code: '1100', name: 'Merchandise Inventory Asset', type: 'Asset', category: 'Inventory', debit: 0, credit: 0, netBalance: 0 },
+      { code: '2010', name: 'Trade Accounts Payable', type: 'Liability', category: 'Current Liabilities', debit: 0, credit: 0, netBalance: 0 },
+      { code: '2050', name: 'Output VAT / Tax Payable', type: 'Liability', category: 'Taxes Payable', debit: 0, credit: 0, netBalance: 0 },
+      { code: '3010', name: 'Owners Contributed Capital', type: 'Equity', category: 'Equity', debit: 0, credit: 0, netBalance: 0 },
+      { code: '4010', name: 'Wholesale Merchandise Sales', type: 'Revenue', category: 'Operating Revenue', debit: 0, credit: 0, netBalance: 0 },
+      { code: '5010', name: 'Cost of Goods Sold (COGS)', type: 'Expense', category: 'Direct Cost', debit: 0, credit: 0, netBalance: 0 },
+      { code: '6010', name: 'Logistics & Operating Expenses', type: 'Expense', category: 'Operating Expenses', debit: 0, credit: 0, netBalance: 0 },
+    ];
 
-  // Chart of Accounts master definitions
-  const accountsData: AccountRow[] = [
-    { code: '1010', name: 'Central Warehouse Petty Cash', type: 'Asset', category: 'Cash & Cash Equivalents', debit: 0, credit: 0, netBalance: 0 },
-    { code: '1020', name: 'Corporate Operating Bank Account', type: 'Asset', category: 'Cash & Cash Equivalents', debit: 0, credit: 0, netBalance: 0 },
-    { code: '1050', name: 'Trade Accounts Receivable', type: 'Asset', category: 'Current Assets', debit: 0, credit: 0, netBalance: 0 },
-    { code: '1100', name: 'Merchandise Inventory Asset', type: 'Asset', category: 'Inventory', debit: 0, credit: 0, netBalance: 0 },
-    { code: '2010', name: 'Trade Accounts Payable', type: 'Liability', category: 'Current Liabilities', debit: 0, credit: 0, netBalance: 0 },
-    { code: '2050', name: 'Output VAT / Tax Payable', type: 'Liability', category: 'Taxes Payable', debit: 0, credit: 0, netBalance: 0 },
-    { code: '3010', name: 'Owners Contributed Capital', type: 'Equity', category: 'Equity', debit: 0, credit: 0, netBalance: 0 },
-    { code: '4010', name: 'Wholesale Merchandise Sales', type: 'Revenue', category: 'Operating Revenue', debit: 0, credit: 0, netBalance: 0 },
-    { code: '5010', name: 'Cost of Goods Sold (COGS)', type: 'Expense', category: 'Direct Cost', debit: 0, credit: 0, netBalance: 0 },
-    { code: '6010', name: 'Logistics & Van Fleet Expenses', type: 'Expense', category: 'Operating Expenses', debit: 0, credit: 0, netBalance: 0 },
-  ];
+    return baseAccounts.map((acc) => {
+      const matchingEntries = glEntries.filter(
+        (e) => e.accountCode === acc.code || (acc.code === '6010' && e.accountCode.startsWith('60'))
+      );
+      const totalDebit = matchingEntries.reduce((s, e) => s + (e.debit || 0), 0);
+      const totalCredit = matchingEntries.reduce((s, e) => s + (e.credit || 0), 0);
 
-  const cashBankData: CashBankAccountRow[] = [
-    { code: '1010', name: 'Warehouse Petty Cash Vault', institution: 'Physical Safe Depot', accountNumber: 'VAULT-01', currency: 'USD', bookBalance: 0, reconciledDate: '2026-10-28' },
-    { code: '1020', name: 'Corporate Operating Account', institution: 'Al Rajhi Corporate Banking', accountNumber: 'SA84 8000 0234 6080 1010', currency: 'USD', bookBalance: 0, reconciledDate: '2026-10-28' },
-    { code: '1015', name: 'Van Fleet Float Cash Box', institution: 'Mobile Cash Drawer', accountNumber: 'FLOAT-VAN-01', currency: 'USD', bookBalance: 0, reconciledDate: '2026-10-28' },
-  ];
+      // Assets & Expenses normal balance = Debit - Credit; Liabilities, Equity & Revenue = Credit - Debit
+      const isDebitNormal = acc.type === 'Asset' || acc.type === 'Expense';
+      const net = isDebitNormal ? totalDebit - totalCredit : totalCredit - totalDebit;
+
+      return {
+        ...acc,
+        debit: totalDebit,
+        credit: totalCredit,
+        netBalance: net,
+      };
+    });
+  }, [glEntries]);
+
+  // Cash & Bank balances computed directly from accountsData
+  const cashBankData: CashBankAccountRow[] = useMemo(() => {
+    const cashAcc = accountsData.find((a) => a.code === '1010');
+    const bankAcc = accountsData.find((a) => a.code === '1020');
+
+    return [
+      {
+        code: '1010',
+        name: 'Warehouse Petty Cash Vault',
+        institution: 'Physical Safe Depot',
+        accountNumber: 'VAULT-01',
+        currency: 'LKR',
+        bookBalance: cashAcc?.netBalance || 0,
+        reconciledDate: '2026-10-28',
+      },
+      {
+        code: '1020',
+        name: 'Corporate Operating Account',
+        institution: 'Commercial Bank of Ceylon',
+        accountNumber: 'LK84 8000 0234 6080 1010',
+        currency: 'LKR',
+        bookBalance: bankAcc?.netBalance || 0,
+        reconciledDate: '2026-10-28',
+      },
+      {
+        code: '1015',
+        name: 'Van Fleet Float Cash Box',
+        institution: 'Mobile Cash Drawer',
+        accountNumber: 'FLOAT-VAN-01',
+        currency: 'LKR',
+        bookBalance: 0,
+        reconciledDate: '2026-10-28',
+      },
+    ];
+  }, [accountsData]);
+
+  // Filtered General Ledger Entries
+  const filteredLedger = useMemo(() => {
+    return glEntries.filter((row) => {
+      const matchesSearch =
+        row.voucherRef.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        row.accountCode.includes(searchQuery) ||
+        row.accountName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        row.memo.toLowerCase().includes(searchQuery.toLowerCase());
+
+      const matchesAccount =
+        selectedAccountFilter === 'all' ||
+        row.accountCode === selectedAccountFilter ||
+        (selectedAccountFilter === '6010' && row.accountCode.startsWith('60'));
+
+      return matchesSearch && matchesAccount;
+    });
+  }, [glEntries, searchQuery, selectedAccountFilter]);
+
+  // Filtered Chart of Accounts
+  const filteredAccounts = useMemo(() => {
+    return accountsData.filter(
+      (acc) =>
+        acc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        acc.code.includes(searchQuery) ||
+        acc.category.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [accountsData, searchQuery]);
 
   // Columns for General Ledger View
-  const ledgerColumns: Column<GeneralLedgerRow>[] = [
+  const ledgerColumns: Column<GeneralLedgerEntry>[] = [
     { key: 'date', header: 'POSTING DATE', width: '120px' },
-    { key: 'voucherRef', header: 'VOUCHER / REF', width: '140px' },
+    { key: 'voucherRef', header: 'VOUCHER / REF', width: '130px' },
     {
       key: 'accountCode',
       header: 'GL ACCOUNT',
@@ -107,21 +173,35 @@ export const FinancePage: React.FC<FinancePageProps> = ({
       key: 'debit',
       header: 'DEBIT',
       align: 'right',
-      render: (r) => (r.debit > 0 ? `${currencySymbol}${r.debit.toFixed(2)}` : '—'),
+      render: (r) =>
+        r.debit > 0 ? (
+          <span className="font-mono text-slate-900 dark:text-neutral-100">
+            {formatCurrency(r.debit, currencySymbol)}
+          </span>
+        ) : (
+          <span className="text-slate-400">—</span>
+        ),
     },
     {
       key: 'credit',
       header: 'CREDIT',
       align: 'right',
-      render: (r) => (r.credit > 0 ? `${currencySymbol}${r.credit.toFixed(2)}` : '—'),
+      render: (r) =>
+        r.credit > 0 ? (
+          <span className="font-mono text-slate-900 dark:text-neutral-100">
+            {formatCurrency(r.credit, currencySymbol)}
+          </span>
+        ) : (
+          <span className="text-slate-400">—</span>
+        ),
     },
     {
       key: 'runningBalance',
       header: 'RUNNING BALANCE',
       align: 'right',
       render: (r) => (
-        <span className="font-bold text-slate-900 dark:text-neutral-100">
-          {currencySymbol}{r.runningBalance.toFixed(2)}
+        <span className="font-bold font-mono text-slate-900 dark:text-neutral-100">
+          {formatCurrency(r.runningBalance, currencySymbol)}
         </span>
       ),
     },
@@ -147,13 +227,13 @@ export const FinancePage: React.FC<FinancePageProps> = ({
       key: 'debit',
       header: 'PERIOD DEBIT',
       align: 'right',
-      render: (r) => `${currencySymbol}${r.debit.toFixed(2)}`,
+      render: (r) => formatCurrency(r.debit, currencySymbol),
     },
     {
       key: 'credit',
       header: 'PERIOD CREDIT',
       align: 'right',
-      render: (r) => `${currencySymbol}${r.credit.toFixed(2)}`,
+      render: (r) => formatCurrency(r.credit, currencySymbol),
     },
     {
       key: 'netBalance',
@@ -161,19 +241,11 @@ export const FinancePage: React.FC<FinancePageProps> = ({
       align: 'right',
       render: (r) => (
         <span className="font-bold text-slate-900 dark:text-neutral-100">
-          {currencySymbol}{r.netBalance.toFixed(2)}
+          {formatCurrency(r.netBalance, currencySymbol)}
         </span>
       ),
     },
   ];
-
-  // Filter accounts
-  const filteredAccounts = accountsData.filter(
-    (acc) =>
-      acc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      acc.code.includes(searchQuery) ||
-      acc.category.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -202,7 +274,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({
           <Button
             variant="primary"
             size="sm"
-            onClick={() => showToast('Journal Entry', 'Manual journal entry adjustment voucher', 'info')}
+            onClick={() => setIsJournalModalOpen(true)}
             leftIcon={<Plus className="w-4 h-4" />}
           >
             New Journal Entry
@@ -213,8 +285,8 @@ export const FinancePage: React.FC<FinancePageProps> = ({
       {/* Navigation Sub-Tabs */}
       <div className="flex border-b border-slate-200 dark:border-neutral-800 space-x-6 text-xs font-semibold overflow-x-auto pb-px">
         {[
-          { id: 'ledger', label: 'General Ledger View' },
-          { id: 'coa', label: 'Chart of Accounts' },
+          { id: 'ledger', label: `General Ledger View (${glEntries.length})` },
+          { id: 'coa', label: `Chart of Accounts (${accountsData.length})` },
           { id: 'journals', label: 'Journal Entries & Vouchers' },
           { id: 'cash_bank', label: 'Cash & Bank Accounts' },
           { id: 'reconciliation', label: 'Bank Statement Reconciliation' },
@@ -237,7 +309,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({
         ))}
       </div>
 
-      {/* 1. General Ledger View (Default & Initial Render) */}
+      {/* 1. General Ledger View (Default & Renders Immediately on First Visit) */}
       {activeTab === 'ledger' && (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-white dark:bg-[#181f1b] border border-slate-200 dark:border-neutral-800">
@@ -259,12 +331,13 @@ export const FinancePage: React.FC<FinancePageProps> = ({
                 className="text-xs bg-slate-50 dark:bg-[#151b18] border border-slate-200 dark:border-neutral-700 rounded-lg px-3 py-1.5 text-slate-700 dark:text-neutral-300 focus:outline-none"
               >
                 <option value="all">All Accounts in Ledger</option>
-                <option value="1010">1010 - Petty Cash</option>
-                <option value="1020">1020 - Corporate Bank</option>
-                <option value="1050">1050 - Trade AR</option>
+                <option value="1010">1010 - Warehouse Petty Cash</option>
+                <option value="1020">1020 - Corporate Operating Bank</option>
+                <option value="1050">1050 - Trade Accounts Receivable</option>
                 <option value="1100">1100 - Merchandise Inventory</option>
-                <option value="2010">2010 - Trade AP</option>
-                <option value="4010">4010 - Sales Revenue</option>
+                <option value="2010">2010 - Trade Accounts Payable</option>
+                <option value="4010">4010 - Wholesale Sales Revenue</option>
+                <option value="6010">6010 - Operating Expenses</option>
               </select>
 
               <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-500 dark:text-neutral-400 pl-2">
@@ -276,7 +349,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({
 
           <Table
             columns={ledgerColumns}
-            data={generalLedgerData}
+            data={filteredLedger}
             keyExtractor={(row) => row.id}
             emptyState={
               <div className="py-12 flex flex-col items-center justify-center text-center">
@@ -293,9 +366,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({
                   <Button
                     variant="primary"
                     size="sm"
-                    onClick={() =>
-                      showToast('Journal Entry', 'Manual journal entry adjustment voucher', 'info')
-                    }
+                    onClick={() => setIsJournalModalOpen(true)}
                     leftIcon={<Plus className="w-4 h-4" />}
                   >
                     Record Opening Balance / Journal Entry
@@ -343,7 +414,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({
             <FileText className="w-6 h-6" />
           </div>
           <h3 className="text-sm font-bold text-slate-900 dark:text-neutral-100">
-            No manual journal entry vouchers on file
+            Double-Entry Journal Vouchers
           </h3>
           <p className="text-xs text-slate-500 dark:text-neutral-400 max-w-sm mt-1 leading-relaxed">
             Record manual double-entry adjustments, depreciation schedules, or period-end closing allocations. Debits and credits must balance before posting.
@@ -352,7 +423,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({
             <Button
               variant="primary"
               size="sm"
-              onClick={() => showToast('Journal Entry', 'Manual journal entry form', 'info')}
+              onClick={() => setIsJournalModalOpen(true)}
               leftIcon={<Plus className="w-4 h-4" />}
             >
               Create Journal Voucher
@@ -389,7 +460,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({
                 <div className="pt-2 border-t border-slate-100 dark:border-neutral-800 flex items-baseline justify-between">
                   <span className="text-xs text-slate-500 dark:text-neutral-400">Book Balance:</span>
                   <span className="text-base font-bold font-mono text-[#167a53] dark:text-[#34d399]">
-                    {currencySymbol}{acc.bookBalance.toFixed(2)}
+                    {formatCurrency(acc.bookBalance, currencySymbol)}
                   </span>
                 </div>
               </div>
@@ -421,6 +492,13 @@ export const FinancePage: React.FC<FinancePageProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal for Creating Double-Entry Journal Entry */}
+      <NewJournalEntryModal
+        isOpen={isJournalModalOpen}
+        onClose={() => setIsJournalModalOpen(false)}
+        currencySymbol={currencySymbol}
+      />
     </div>
   );
 };

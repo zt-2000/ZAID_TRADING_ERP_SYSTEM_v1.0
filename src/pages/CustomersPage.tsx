@@ -1,39 +1,53 @@
 import React, { useState } from 'react';
-import { Plus, Search, Download, Users, Phone, Mail } from 'lucide-react';
+import { Plus, Search, Download, Users } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Table, Column } from '../components/ui/Table';
+import { Badge } from '../components/ui/Badge';
+import { useTransactions, CustomerRecord } from '../context/TransactionContext';
 import { useToast } from '../context/ToastContext';
+import { formatCurrency } from '../utils/formatters';
 
 interface CustomersPageProps {
   onOpenAddCustomer: () => void;
   currencySymbol?: string;
 }
 
-interface CustomerRow {
-  id: string;
-  code: string;
-  name: string;
-  phone: string;
-  email?: string;
-  creditLimit: number | null;
-  creditDays: number | null;
-  balance: number;
-  status: 'active' | 'archived';
-}
-
 export const CustomersPage: React.FC<CustomersPageProps> = ({
   onOpenAddCustomer,
-  currencySymbol = '$',
+  currencySymbol = 'Rs.',
 }) => {
   const { showToast } = useToast();
+  const { customers } = useTransactions();
   const [activeTab, setActiveTab] = useState<'all' | 'credit' | 'cash' | 'statements'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const customerData: CustomerRow[] = [];
+  const filteredCustomers = customers.filter((c) => {
+    const matchesSearch =
+      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.phone.includes(searchQuery);
 
-  const columns: Column<CustomerRow>[] = [
-    { key: 'code', header: 'CUSTOMER CODE' },
-    { key: 'name', header: 'COMMERCIAL NAME' },
+    if (activeTab === 'credit') return matchesSearch && c.creditLimit !== null;
+    if (activeTab === 'cash') return matchesSearch && c.creditLimit === null;
+    return matchesSearch;
+  });
+
+  const columns: Column<CustomerRecord>[] = [
+    { key: 'code', header: 'CUSTOMER CODE', width: '130px' },
+    {
+      key: 'name',
+      header: 'COMMERCIAL NAME',
+      render: (r) => (
+        <div>
+          <span className="font-semibold text-slate-900 dark:text-neutral-100">{r.name}</span>
+          {(r.cashAccountId || r.codAccountId) && (
+            <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+              Settlement: {r.cashAccountId ? `Cash (${r.cashAccountId})` : ''} {r.codAccountId ? `• COD (${r.codAccountId})` : ''}
+            </p>
+          )}
+        </div>
+      ),
+    },
     {
       key: 'phone',
       header: 'PHONE & CONTACT',
@@ -48,28 +62,36 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
       key: 'creditLimit',
       header: 'CREDIT LIMIT',
       align: 'right',
-      render: (r) => (r.creditLimit !== null ? `${currencySymbol}${r.creditLimit.toFixed(2)}` : 'Unset (Cash)'),
+      render: (r) =>
+        r.creditLimit !== null
+          ? formatCurrency(r.creditLimit, currencySymbol)
+          : <span className="text-slate-400">Unset (Cash)</span>,
     },
     {
       key: 'creditDays',
       header: 'CREDIT DAYS',
       align: 'right',
-      render: (r) => (r.creditDays !== null ? `${r.creditDays} days` : 'Immediate'),
+      render: (r) =>
+        r.creditDays !== null ? `${r.creditDays} days` : <span className="text-slate-400">Immediate</span>,
     },
     {
       key: 'balance',
       header: 'OUTSTANDING',
       align: 'right',
-      render: (r) => `${currencySymbol}${r.balance.toFixed(2)}`,
+      render: (r) => (
+        <span className="font-mono font-bold text-slate-900 dark:text-neutral-100">
+          {formatCurrency(r.balance, currencySymbol)}
+        </span>
+      ),
     },
     {
       key: 'status',
       header: 'STATUS',
       align: 'center',
       render: (r) => (
-        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${r.status === 'active' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-slate-100 text-slate-600'}`}>
+        <Badge variant={r.status === 'active' ? 'success' : 'neutral'} dot>
           {r.status.toUpperCase()}
-        </span>
+        </Badge>
       ),
     },
   ];
@@ -111,7 +133,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
 
       <div className="flex border-b border-slate-200 dark:border-neutral-800 space-x-6 text-xs font-semibold overflow-x-auto pb-px">
         {[
-          { id: 'all', label: 'All Customer Accounts' },
+          { id: 'all', label: `All Customer Accounts (${customers.length})` },
           { id: 'credit', label: 'Credit Term Accounts' },
           { id: 'cash', label: 'Cash / COD Accounts' },
           { id: 'statements', label: 'Account Statements' },
@@ -146,7 +168,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
 
       <Table
         columns={columns}
-        data={customerData}
+        data={filteredCustomers}
         keyExtractor={(row) => row.id}
         emptyState={
           <div className="py-12 flex flex-col items-center justify-center text-center">

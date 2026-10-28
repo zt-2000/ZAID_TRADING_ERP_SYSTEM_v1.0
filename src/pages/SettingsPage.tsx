@@ -1,11 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { CompanySettings } from '../types';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { useToast } from '../context/ToastContext';
 import { useTheme } from '../context/ThemeContext';
-import { Building2, DollarSign, Receipt, MapPin, Palette, ShieldCheck, Save } from 'lucide-react';
+import { useUser } from '../context/UserContext';
+import {
+  Building2,
+  DollarSign,
+  Receipt,
+  MapPin,
+  Palette,
+  ShieldCheck,
+  Save,
+  Upload,
+  Image as ImageIcon,
+  Trash2,
+  X,
+  AlertCircle,
+  CheckCircle2,
+  Lock,
+} from 'lucide-react';
 
 interface SettingsPageProps {
   settings: CompanySettings;
@@ -18,18 +34,110 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 }) => {
   const { showToast } = useToast();
   const { setTheme } = useTheme();
+  const { currentUser, isSuperAdmin } = useUser();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [activeTab, setActiveTab] = useState<
     'general' | 'currency' | 'tax' | 'warehouses' | 'theme'
   >('general');
   const [formData, setFormData] = useState<CompanySettings>(initialSettings);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Logo state
+  const [logoPreview, setLogoPreview] = useState<string | null>(initialSettings.logoUrl || null);
+  const [isNewLogoStaged, setIsNewLogoStaged] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const [confirmRemoveLogo, setConfirmRemoveLogo] = useState(false);
+
   const updateField = <K extends keyof CompanySettings>(key: K, value: CompanySettings[K]) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
   };
 
+  const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLogoError(null);
+    setConfirmRemoveLogo(false);
+
+    // 1. File Type Validation
+    const validMimes = ['image/png', 'image/jpeg', 'image/webp'];
+    if (!validMimes.includes(file.type)) {
+      setLogoError('Invalid file format. Please upload a PNG, JPEG, or WebP image.');
+      showToast('Invalid File', 'Only PNG, JPEG, and WebP files are supported for company logos.', 'error');
+      return;
+    }
+
+    // 2. File Size Validation (2 MB limit)
+    const MAX_SIZE = 2 * 1024 * 1024; // 2MB
+    if (file.size > MAX_SIZE) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      setLogoError(`File size (${sizeMB} MB) exceeds the maximum allowed limit of 2 MB.`);
+      showToast('File Too Large', `Company logo must be under 2 MB (your file is ${sizeMB} MB).`, 'error');
+      return;
+    }
+
+    // 3. Image Content Validation (read and load into Image object)
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUri = event.target?.result as string;
+      const testImg = new Image();
+      testImg.onload = () => {
+        if (testImg.naturalWidth < 10 || testImg.naturalHeight < 10) {
+          setLogoError('The uploaded image is too small or corrupted.');
+          showToast('Corrupted Image', 'The image dimensions are invalid.', 'error');
+          return;
+        }
+
+        setLogoPreview(dataUri);
+        setIsNewLogoStaged(true);
+        updateField('logoUrl', dataUri);
+        showToast('Logo Staged', 'Logo preview loaded. Click "Save Configuration" to commit.', 'info');
+      };
+      testImg.onerror = () => {
+        setLogoError('Failed to parse image file. File content may be corrupted.');
+        showToast('Parse Error', 'Could not read image content.', 'error');
+      };
+      testImg.src = dataUri;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCancelLogoStaging = () => {
+    setLogoPreview(initialSettings.logoUrl || null);
+    setIsNewLogoStaged(false);
+    setLogoError(null);
+    updateField('logoUrl', initialSettings.logoUrl || '');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveLogo = () => {
+    if (!confirmRemoveLogo) {
+      setConfirmRemoveLogo(true);
+      return;
+    }
+
+    setLogoPreview(null);
+    setIsNewLogoStaged(false);
+    setConfirmRemoveLogo(false);
+    setLogoError(null);
+    updateField('logoUrl', '');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    showToast('Logo Removed', 'Company logo removed. Reverted to default corporate badge.', 'info');
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!isSuperAdmin) {
+      showToast('Unauthorized', 'Only system administrators can modify company-wide settings.', 'error');
+      return;
+    }
+
     if (!formData.companyName.trim()) {
       showToast('Validation Error', 'Company commercial name cannot be empty', 'error');
       return;
@@ -38,13 +146,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setIsSaving(true);
     setTimeout(() => {
       setIsSaving(false);
+      setIsNewLogoStaged(false);
       onSaveSettings(formData);
       if (formData.themePreference) {
         setTheme(formData.themePreference);
       }
       showToast(
         'Configuration Saved',
-        'Zaid Trading ERP enterprise parameters have been synchronized.',
+        'Zaid Trading ERP enterprise parameters and branding have been synchronized.',
         'success'
       );
     }, 500);
@@ -70,11 +179,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           variant="primary"
           onClick={handleSave}
           isLoading={isSaving}
+          disabled={!isSuperAdmin}
           leftIcon={<Save className="w-4 h-4" />}
         >
           Save Configuration
         </Button>
       </div>
+
+      {!isSuperAdmin && (
+        <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+          <Lock className="w-4 h-4 shrink-0" />
+          <span>
+            You are signed in as <strong>{currentUser.role}</strong>. Only authorized Administrators can modify company-wide identity and branding settings.
+          </span>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-neutral-800 space-x-6 text-xs font-semibold overflow-x-auto pb-px">
@@ -88,7 +207,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           }`}
         >
           <Building2 className="w-4 h-4" />
-          <span>Company Profile</span>
+          <span>Company Profile & Logo</span>
         </button>
 
         <button
@@ -147,70 +266,198 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       {/* Tab Panels */}
       <form onSubmit={handleSave} className="space-y-6">
         {activeTab === 'general' && (
-          <div className="p-6 rounded-xl bg-white dark:bg-[#181f1b] border border-slate-200 dark:border-neutral-800 shadow-xs space-y-4">
-            <h2 className="text-sm font-bold text-slate-900 dark:text-neutral-100 flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-[#167a53] dark:text-[#34d399]" />
-              <span>Enterprise Commercial Identity</span>
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label="Company Operating Name"
-                value={formData.companyName}
-                onChange={(e) => updateField('companyName', e.target.value)}
-                required
-              />
-              <Input
-                label="Full Registered Legal Entity"
-                value={formData.legalName}
-                onChange={(e) => updateField('legalName', e.target.value)}
-                required
-              />
+          <div className="space-y-6">
+            {/* Dedicated Company Logo Section */}
+            <div className="p-6 rounded-xl bg-white dark:bg-[#181f1b] border border-slate-200 dark:border-neutral-800 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-neutral-800 pb-3">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-neutral-100 flex items-center gap-2">
+                    <ImageIcon className="w-4 h-4 text-[#167a53] dark:text-[#34d399]" />
+                    <span>Company Logo & Corporate Branding</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-neutral-400 mt-0.5">
+                    Rendered in application navigation, commercial invoices, delivery notes, and audited reports
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={handleLogoFileChange}
+                    disabled={!isSuperAdmin}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={!isSuperAdmin}
+                    leftIcon={<Upload className="w-3.5 h-3.5" />}
+                  >
+                    {logoPreview ? 'Replace Logo' : 'Upload Logo'}
+                  </Button>
+
+                  {logoPreview && (
+                    <Button
+                      type="button"
+                      variant={confirmRemoveLogo ? 'danger' : 'ghost'}
+                      size="sm"
+                      onClick={handleRemoveLogo}
+                      disabled={!isSuperAdmin}
+                      className={confirmRemoveLogo ? '' : 'text-rose-600 dark:text-rose-400'}
+                      leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                    >
+                      {confirmRemoveLogo ? 'Confirm Remove?' : 'Remove'}
+                    </Button>
+                  )}
+
+                  {isNewLogoStaged && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleCancelLogoStaging}
+                      leftIcon={<X className="w-3.5 h-3.5" />}
+                    >
+                      Cancel Staging
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {logoError && (
+                <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{logoError}</span>
+                </div>
+              )}
+
+              {/* Dual Surface Preview Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                {/* Light Surface Preview */}
+                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col items-center justify-center min-h-[140px] text-center">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-3">
+                    Light Surface & Print Preview
+                  </p>
+                  {logoPreview ? (
+                    <img
+                      src={logoPreview}
+                      alt="Logo on light surface"
+                      className="max-h-16 max-w-[200px] object-contain drop-shadow-xs"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1.5 text-slate-400">
+                      <div className="w-12 h-12 rounded-xl bg-[#167a53] flex items-center justify-center text-white font-bold text-xl shadow-xs">
+                        {formData.companyName.charAt(0) || 'Z'}
+                      </div>
+                      <span className="text-[11px]">Default Corporate Monogram</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Dark Surface Preview */}
+                <div className="p-4 rounded-xl border border-neutral-800 bg-[#121614] flex flex-col items-center justify-center min-h-[140px] text-center">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-3">
+                    Dark Surface & Sidebar Preview
+                  </p>
+                  {logoPreview ? (
+                    <img
+                      src={logoPreview}
+                      alt="Logo on dark surface"
+                      className="max-h-16 max-w-[200px] object-contain"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-1.5 text-neutral-500">
+                      <div className="w-12 h-12 rounded-xl bg-[#167a53] flex items-center justify-center text-white font-bold text-xl shadow-xs">
+                        {formData.companyName.charAt(0) || 'Z'}
+                      </div>
+                      <span className="text-[11px]">Default Corporate Monogram</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Logo Specs & Policy */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 rounded-lg bg-slate-50 dark:bg-[#151b18] text-[11px] text-slate-500 dark:text-neutral-400">
+                <span>
+                  Supported: <strong>PNG (transparent)</strong>, <strong>JPEG</strong>, <strong>WebP</strong> • Max: <strong>2 MB</strong> • Proportional scaling preserved.
+                </span>
+                <span className="text-emerald-700 dark:text-emerald-400 font-medium flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Ready for Supabase Storage</span>
+                </span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label="Commercial Registration (CR) Number"
-                value={formData.registrationNumber}
-                onChange={(e) => updateField('registrationNumber', e.target.value)}
-              />
-              <Input
-                label="VAT / Tax Identification Number (TIN)"
-                value={formData.taxNumber}
-                onChange={(e) => updateField('taxNumber', e.target.value)}
-              />
-            </div>
+            {/* Enterprise Commercial Identity */}
+            <div className="p-6 rounded-xl bg-white dark:bg-[#181f1b] border border-slate-200 dark:border-neutral-800 shadow-xs space-y-4">
+              <h2 className="text-sm font-bold text-slate-900 dark:text-neutral-100 flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-[#167a53] dark:text-[#34d399]" />
+                <span>Enterprise Commercial Identity</span>
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Company Operating Name"
+                  value={formData.companyName}
+                  onChange={(e) => updateField('companyName', e.target.value)}
+                  required
+                />
+                <Input
+                  label="Full Registered Legal Entity"
+                  value={formData.legalName}
+                  onChange={(e) => updateField('legalName', e.target.value)}
+                  required
+                />
+              </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label="Official ERP Email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => updateField('email', e.target.value)}
-              />
-              <Input
-                label="Commercial Phone / Hotline"
-                value={formData.phone}
-                onChange={(e) => updateField('phone', e.target.value)}
-              />
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Commercial Registration (CR) Number"
+                  value={formData.registrationNumber}
+                  onChange={(e) => updateField('registrationNumber', e.target.value)}
+                />
+                <Input
+                  label="VAT / Tax Identification Number (TIN)"
+                  value={formData.taxNumber}
+                  onChange={(e) => updateField('taxNumber', e.target.value)}
+                />
+              </div>
 
-            <Input
-              label="Headquarters Street Address"
-              value={formData.address}
-              onChange={(e) => updateField('address', e.target.value)}
-            />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Official ERP Email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => updateField('email', e.target.value)}
+                />
+                <Input
+                  label="Commercial Phone / Hotline"
+                  value={formData.phone}
+                  onChange={(e) => updateField('phone', e.target.value)}
+                />
+              </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
-                label="City / Hub"
-                value={formData.city}
-                onChange={(e) => updateField('city', e.target.value)}
+                label="Headquarters Street Address"
+                value={formData.address}
+                onChange={(e) => updateField('address', e.target.value)}
               />
-              <Input
-                label="Country Jurisdiction"
-                value={formData.country}
-                onChange={(e) => updateField('country', e.target.value)}
-              />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="City / Hub"
+                  value={formData.city}
+                  onChange={(e) => updateField('city', e.target.value)}
+                />
+                <Input
+                  label="Country Jurisdiction"
+                  value={formData.country}
+                  onChange={(e) => updateField('country', e.target.value)}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -226,8 +473,22 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <Select
                 label="Base Operational Currency"
                 value={formData.defaultCurrency}
-                onChange={(e) => updateField('defaultCurrency', e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  let sym = '$';
+                  if (val === 'LKR') sym = 'Rs.';
+                  else if (val === 'SAR') sym = 'ر.س';
+                  else if (val === 'AED') sym = 'د.إ';
+                  else if (val === 'EUR') sym = '€';
+                  else if (val === 'GBP') sym = '£';
+                  setFormData((prev) => ({
+                    ...prev,
+                    defaultCurrency: val,
+                    currencySymbol: sym,
+                  }));
+                }}
                 options={[
+                  { value: 'LKR', label: 'LKR - Sri Lankan Rupee (Rs.)' },
                   { value: 'USD', label: 'USD - United States Dollar ($)' },
                   { value: 'SAR', label: 'SAR - Saudi Riyal (ر.س)' },
                   { value: 'AED', label: 'AED - UAE Dirham (د.إ)' },
@@ -247,7 +508,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 value={String(formData.currencyPrecision)}
                 onChange={(e) => updateField('currencyPrecision', parseInt(e.target.value, 10))}
                 options={[
-                  { value: '2', label: '2 Decimals (e.g. $0.00)' },
+                  { value: '2', label: '2 Decimals (e.g. Rs. 0.00)' },
                   { value: '3', label: '3 Decimals (e.g. 0.000)' },
                   { value: '0', label: '0 Decimals (Whole numbers)' },
                 ]}
@@ -260,6 +521,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 value={formData.timeZone}
                 onChange={(e) => updateField('timeZone', e.target.value)}
                 options={[
+                  { value: 'Asia/Colombo', label: 'Asia/Colombo (UTC+05:30 - Sri Lanka)' },
                   { value: 'Asia/Riyadh', label: 'Asia/Riyadh (UTC+03:00)' },
                   { value: 'Asia/Dubai', label: 'Asia/Dubai (UTC+04:00)' },
                   { value: 'UTC', label: 'UTC (Universal Coordinated Time)' },

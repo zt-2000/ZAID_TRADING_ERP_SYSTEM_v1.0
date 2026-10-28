@@ -2,32 +2,33 @@ import React, { useState } from 'react';
 import { Plus, Search, Download, Building2 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Table, Column } from '../components/ui/Table';
+import { Badge } from '../components/ui/Badge';
+import { AddSupplierModal } from '../components/modals/AddSupplierModal';
+import { useTransactions, SupplierRecord } from '../context/TransactionContext';
 import { useToast } from '../context/ToastContext';
+import { formatCurrency } from '../utils/formatters';
 
 interface SuppliersPageProps {
   currencySymbol?: string;
 }
 
-interface SupplierRow {
-  id: string;
-  code: string;
-  name: string;
-  phone: string;
-  email?: string;
-  paymentTerms: string;
-  balance: number;
-  status: 'active' | 'archived';
-}
-
 export const SuppliersPage: React.FC<SuppliersPageProps> = ({
-  currencySymbol = '$',
+  currencySymbol = 'Rs.',
 }) => {
   const { showToast } = useToast();
+  const { suppliers } = useTransactions();
   const [searchQuery, setSearchQuery] = useState('');
-  const supplierData: SupplierRow[] = [];
+  const [isAddSupplierOpen, setIsAddSupplierOpen] = useState(false);
 
-  const columns: Column<SupplierRow>[] = [
-    { key: 'code', header: 'SUPPLIER CODE' },
+  const filteredSuppliers = suppliers.filter(
+    (s) =>
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.phone.includes(searchQuery)
+  );
+
+  const columns: Column<SupplierRecord>[] = [
+    { key: 'code', header: 'SUPPLIER CODE', width: '130px' },
     { key: 'name', header: 'COMPANY ENTITY' },
     {
       key: 'phone',
@@ -44,16 +45,20 @@ export const SuppliersPage: React.FC<SuppliersPageProps> = ({
       key: 'balance',
       header: 'OUTSTANDING PAYABLE',
       align: 'right',
-      render: (r) => `${currencySymbol}${r.balance.toFixed(2)}`,
+      render: (r) => (
+        <span className="font-mono font-bold text-slate-900 dark:text-neutral-100">
+          {formatCurrency(r.balance, currencySymbol)}
+        </span>
+      ),
     },
     {
       key: 'status',
       header: 'STATUS',
       align: 'center',
       render: (r) => (
-        <span className="inline-block px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+        <Badge variant={r.status === 'active' ? 'success' : 'neutral'} dot>
           {r.status.toUpperCase()}
-        </span>
+        </Badge>
       ),
     },
   ];
@@ -85,7 +90,7 @@ export const SuppliersPage: React.FC<SuppliersPageProps> = ({
           <Button
             variant="primary"
             size="sm"
-            onClick={() => showToast('Add Supplier', 'Supplier registration workflow initialized', 'info')}
+            onClick={() => setIsAddSupplierOpen(true)}
             leftIcon={<Plus className="w-4 h-4" />}
           >
             Add Supplier
@@ -108,7 +113,7 @@ export const SuppliersPage: React.FC<SuppliersPageProps> = ({
 
       <Table
         columns={columns}
-        data={supplierData}
+        data={filteredSuppliers}
         keyExtractor={(row) => row.id}
         emptyState={
           <div className="py-12 flex flex-col items-center justify-center text-center">
@@ -125,7 +130,7 @@ export const SuppliersPage: React.FC<SuppliersPageProps> = ({
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => showToast('Add Supplier', 'Supplier registration modal', 'info')}
+                onClick={() => setIsAddSupplierOpen(true)}
                 leftIcon={<Plus className="w-4 h-4" />}
               >
                 Register First Supplier
@@ -133,6 +138,12 @@ export const SuppliersPage: React.FC<SuppliersPageProps> = ({
             </div>
           </div>
         }
+      />
+
+      <AddSupplierModal
+        isOpen={isAddSupplierOpen}
+        onClose={() => setIsAddSupplierOpen(false)}
+        currencySymbol={currencySymbol}
       />
     </div>
   );

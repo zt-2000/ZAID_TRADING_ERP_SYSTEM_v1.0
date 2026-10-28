@@ -30,6 +30,7 @@ interface CategoryContextType {
   ) => { success: boolean; error?: string };
   archiveCategory: (id: string) => void;
   restoreCategory: (id: string) => void;
+  deleteCategory: (id: string) => { success: boolean; error?: string };
   getCategoryById: (id: string) => ProductCategory | undefined;
 }
 
@@ -220,6 +221,24 @@ export const CategoryProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   }, []);
 
+  const deleteCategory = useCallback(
+    (id: string) => {
+      const cat = categories.find((c) => c.id === id);
+      if (!cat) {
+        return { success: false, error: 'Category not found.' };
+      }
+      if (cat.productCount > 0) {
+        return {
+          success: false,
+          error: `Cannot delete category "${cat.name}" because ${cat.productCount} SKUs are assigned to it. Deactivate or archive it instead to preserve catalog data integrity.`,
+        };
+      }
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+      return { success: true };
+    },
+    [categories]
+  );
+
   const getCategoryById = useCallback(
     (id: string) => categories.find((c) => c.id === id),
     [categories]
@@ -234,6 +253,7 @@ export const CategoryProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateCategory,
         archiveCategory,
         restoreCategory,
+        deleteCategory,
         getCategoryById,
       }}
     >
