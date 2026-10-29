@@ -27,7 +27,7 @@ export const InviteUserModal: React.FC<InviteUserModalProps> = ({ isOpen, onClos
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError('Staff member full name is required.');
@@ -41,8 +41,8 @@ export const InviteUserModal: React.FC<InviteUserModalProps> = ({ isOpen, onClos
     setIsSubmitting(true);
     setError(null);
 
-    setTimeout(() => {
-      const res = inviteUser({
+    try {
+      const res = await inviteUser({
         name: name.trim(),
         displayName: displayName.trim() || name.trim().split(' ')[0],
         email: email.trim().toLowerCase(),
@@ -67,7 +67,10 @@ export const InviteUserModal: React.FC<InviteUserModalProps> = ({ isOpen, onClos
       } else {
         setError(res.message);
       }
-    }, 400);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setError(err?.message || 'Failed to send invitation.');
+    }
   };
 
   return (
@@ -147,7 +150,7 @@ export const InviteUserModal: React.FC<InviteUserModalProps> = ({ isOpen, onClos
               { value: 'Salesperson', label: 'Salesperson (Invoicing & Customer CRM)' },
               { value: 'Storekeeper', label: 'Storekeeper (GRN & Warehouse Bins)' },
               { value: 'Accountant', label: 'Accountant (Ledger & Expenses)' },
-              { value: 'Delivery Driver', label: 'Delivery Driver (Van Fleet Sales)' },
+              { value: 'Delivery Driver', label: 'Delivery Driver' },
             ]}
           />
 

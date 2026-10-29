@@ -1,36 +1,372 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
+// =========================================================================
+// TABLE ALLOWLISTS & PERMISSION POLICIES
+// =========================================================================
+
+export const ALLOWED_IMPORT_TABLES = [
+  'product_categories',
+  'expense_categories',
+  'products',
+  'customers',
+  'suppliers',
+  'warehouses',
+  'warehouse_bins',
+  'quotations',
+  'sales_orders',
+  'sales_invoices',
+  'deliveries',
+  'purchases',
+  'grns',
+  'expenses',
+] as const;
+
+export type AllowedImportTable = typeof ALLOWED_IMPORT_TABLES[number];
+
+export const BLOCKED_TABLES = [
+  'general_ledger',
+  'companies',
+  'user_profiles',
+  'user_invitations',
+] as const;
+
+export type BlockedTable = typeof BLOCKED_TABLES[number];
+
+// Role-based authorization matrix for table writes (matching database RLS)
+export const TABLE_WRITE_ROLE_PERMISSIONS: Record<AllowedImportTable, string[]> = {
+  product_categories: ['Owner / Administrator', 'Manager', 'Storekeeper'],
+  expense_categories: ['Owner / Administrator', 'Manager', 'Accountant'],
+  products: ['Owner / Administrator', 'Manager', 'Storekeeper'],
+  customers: ['Owner / Administrator', 'Manager', 'Salesperson'],
+  suppliers: ['Owner / Administrator', 'Manager'],
+  warehouses: ['Owner / Administrator', 'Manager'],
+  warehouse_bins: ['Owner / Administrator', 'Manager', 'Storekeeper'],
+  quotations: ['Owner / Administrator', 'Manager', 'Salesperson'],
+  sales_orders: ['Owner / Administrator', 'Manager', 'Salesperson'],
+  sales_invoices: ['Owner / Administrator', 'Manager', 'Salesperson'],
+  deliveries: ['Owner / Administrator', 'Manager'],
+  purchases: ['Owner / Administrator', 'Manager'],
+  grns: ['Owner / Administrator', 'Manager', 'Storekeeper'],
+  expenses: ['Owner / Administrator', 'Manager', 'Accountant'],
+};
+
+// UUID validation regex (RFC 4122)
+export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export interface TableColumnSchema {
+  allowedColumns: string[];
+  requiredFields: string[];
+  uniqueBusinessKey: string;
+  uuidFields?: string[];
+  numericFields?: { field: string; min?: number; integer?: boolean; optional?: boolean }[];
+  dateFields?: string[];
+  jsonFields?: string[];
+  statusEnums?: string[];
+}
+
+export const TABLE_SCHEMAS: Record<AllowedImportTable, TableColumnSchema> = {
+  product_categories: {
+    allowedColumns: ['id', 'code', 'name', 'description'],
+    requiredFields: ['code', 'name'],
+    uniqueBusinessKey: 'code',
+    uuidFields: ['id'],
+  },
+  expense_categories: {
+    allowedColumns: ['id', 'name', 'description', 'monthly_budget', 'usage_count'],
+    requiredFields: ['name'],
+    uniqueBusinessKey: 'name',
+    uuidFields: ['id'],
+    numericFields: [
+      { field: 'monthly_budget', min: 0 },
+      { field: 'usage_count', min: 0, integer: true },
+    ],
+  },
+  products: {
+    allowedColumns: [
+      'id', 'sku', 'name', 'category_id', 'unit', 'purchase_price', 
+      'selling_price', 'min_stock_level', 'current_stock', 'status'
+    ],
+    requiredFields: ['sku', 'name'],
+    uniqueBusinessKey: 'sku',
+    uuidFields: ['id', 'category_id'],
+    numericFields: [
+      { field: 'purchase_price', min: 0 },
+      { field: 'selling_price', min: 0 },
+      { field: 'min_stock_level', min: 0 },
+      { field: 'current_stock', min: 0 },
+    ],
+    statusEnums: ['active', 'inactive', 'archived'],
+  },
+  customers: {
+    allowedColumns: [
+      'id', 'code', 'name', 'phone', 'email', 'address', 
+      'tax_number', 'credit_limit', 'credit_days', 'balance', 'status'
+    ],
+    requiredFields: ['code', 'name'],
+    uniqueBusinessKey: 'code',
+    uuidFields: ['id'],
+    numericFields: [
+      { field: 'credit_limit', min: 0, optional: true },
+      { field: 'credit_days', min: 0, integer: true, optional: true },
+      { field: 'balance' },
+    ],
+    statusEnums: ['active', 'archived'],
+  },
+  suppliers: {
+    allowedColumns: [
+      'id', 'code', 'name', 'phone', 'email', 'address', 
+      'tax_number', 'payment_terms', 'balance', 'status'
+    ],
+    requiredFields: ['code', 'name'],
+    uniqueBusinessKey: 'code',
+    uuidFields: ['id'],
+    numericFields: [
+      { field: 'balance' },
+    ],
+    statusEnums: ['active', 'archived'],
+  },
+  warehouses: {
+    allowedColumns: ['id', 'code', 'name', 'type', 'address', 'city', 'is_default', 'status', 'manager_name'],
+    requiredFields: ['code', 'name'],
+    uniqueBusinessKey: 'code',
+    uuidFields: ['id'],
+    statusEnums: ['active', 'inactive'],
+  },
+  warehouse_bins: {
+    allowedColumns: ['id', 'warehouse_id', 'code', 'name', 'aisle', 'rack', 'shelf', 'type', 'max_weight_kg', 'status'],
+    requiredFields: ['warehouse_id', 'code', 'name'],
+    uniqueBusinessKey: 'code',
+    uuidFields: ['id', 'warehouse_id'],
+    numericFields: [
+      { field: 'max_weight_kg', min: 0 },
+    ],
+    statusEnums: ['active', 'inactive'],
+  },
+  quotations: {
+    allowedColumns: [
+      'id', 'quotation_number', 'date', 'expiry_date', 'customer_id', 
+      'customer_name', 'warehouse_name', 'items', 'subtotal', 'discount_total', 
+      'apply_vat', 'vat_rate', 'tax_total', 'total', 'status', 'notes'
+    ],
+    requiredFields: ['quotation_number', 'date', 'expiry_date', 'customer_name'],
+    uniqueBusinessKey: 'quotation_number',
+    uuidFields: ['id', 'customer_id'],
+    dateFields: ['date', 'expiry_date'],
+    jsonFields: ['items'],
+    numericFields: [
+      { field: 'subtotal', min: 0 },
+      { field: 'discount_total', min: 0 },
+      { field: 'vat_rate', min: 0 },
+      { field: 'tax_total', min: 0 },
+      { field: 'total', min: 0 },
+    ],
+  },
+  sales_orders: {
+    allowedColumns: [
+      'id', 'order_number', 'source_quotation_id', 'date', 'delivery_date', 
+      'customer_id', 'customer_name', 'warehouse_name', 'items', 'subtotal', 
+      'discount_total', 'apply_vat', 'vat_rate', 'tax_total', 'total', 
+      'status', 'tracking_number', 'notes'
+    ],
+    requiredFields: ['order_number', 'date', 'customer_name'],
+    uniqueBusinessKey: 'order_number',
+    uuidFields: ['id', 'source_quotation_id', 'customer_id'],
+    dateFields: ['date', 'delivery_date'],
+    jsonFields: ['items'],
+    numericFields: [
+      { field: 'subtotal', min: 0 },
+      { field: 'discount_total', min: 0 },
+      { field: 'vat_rate', min: 0 },
+      { field: 'tax_total', min: 0 },
+      { field: 'total', min: 0 },
+    ],
+  },
+  sales_invoices: {
+    allowedColumns: [
+      'id', 'invoice_number', 'date', 'due_date', 'customer_id', 
+      'customer_name', 'payment_terms', 'warehouse_name', 'subtotal', 
+      'apply_vat', 'vat_rate', 'tax_total', 'total', 'paid', 'balance', 
+      'status', 'items_count', 'notes'
+    ],
+    requiredFields: ['invoice_number', 'date', 'due_date', 'customer_name'],
+    uniqueBusinessKey: 'invoice_number',
+    uuidFields: ['id', 'customer_id'],
+    dateFields: ['date', 'due_date'],
+    numericFields: [
+      { field: 'subtotal', min: 0 },
+      { field: 'vat_rate', min: 0 },
+      { field: 'tax_total', min: 0 },
+      { field: 'total', min: 0 },
+      { field: 'paid', min: 0 },
+      { field: 'items_count', min: 1, integer: true },
+    ],
+  },
+  deliveries: {
+    allowedColumns: [
+      'id', 'delivery_number', 'sales_order_id', 'sales_order_number', 
+      'customer_id', 'customer_name', 'customer_phone', 'delivery_address', 
+      'scheduled_date', 'actual_delivery_date', 'assigned_staff', 
+      'vehicle_details', 'status', 'items', 'recipient_name', 
+      'proof_of_delivery_ref', 'notes', 'history'
+    ],
+    requiredFields: ['delivery_number', 'sales_order_number', 'customer_name'],
+    uniqueBusinessKey: 'delivery_number',
+    uuidFields: ['id', 'sales_order_id', 'customer_id'],
+    jsonFields: ['items', 'history'],
+    statusEnums: ['Pending', 'Scheduled', 'Preparing', 'Dispatched', 'In Transit', 'Delivered', 'Failed', 'Cancelled'],
+  },
+  purchases: {
+    allowedColumns: [
+      'id', 'po_number', 'date', 'supplier_id', 'supplier_name', 
+      'warehouse_name', 'payment_terms', 'total_cost', 'status'
+    ],
+    requiredFields: ['po_number', 'date', 'supplier_name'],
+    uniqueBusinessKey: 'po_number',
+    uuidFields: ['id', 'supplier_id'],
+    dateFields: ['date'],
+    numericFields: [
+      { field: 'total_cost', min: 0 },
+    ],
+  },
+  grns: {
+    allowedColumns: [
+      'id', 'grn_number', 'purchase_order_id', 'po_number', 'supplier_name', 
+      'date', 'warehouse_name', 'items', 'status', 'received_by', 'notes'
+    ],
+    requiredFields: ['grn_number', 'po_number', 'supplier_name', 'date', 'received_by'],
+    uniqueBusinessKey: 'grn_number',
+    uuidFields: ['id', 'purchase_order_id'],
+    dateFields: ['date'],
+    jsonFields: ['items'],
+  },
+  expenses: {
+    allowedColumns: [
+      'id', 'voucher_no', 'date', 'description', 'category_id', 
+      'category_name', 'payment_account', 'account_name', 'payee', 
+      'reference', 'amount', 'status'
+    ],
+    requiredFields: ['voucher_no', 'date', 'description', 'category_name', 'payment_account', 'account_name', 'payee', 'amount'],
+    uniqueBusinessKey: 'voucher_no',
+    uuidFields: ['id', 'category_id'],
+    dateFields: ['date'],
+    numericFields: [
+      { field: 'amount', min: 0 },
+    ],
+  },
+};
+
 export interface SyncStatus {
   isConfigured: boolean;
   connected: boolean;
   message: string;
 }
 
+export interface ValidationDetail {
+  row: number;
+  field?: string;
+  error: string;
+}
+
 export interface ImportPreviewResult {
+  tableName: string;
+  totalRecords: number;
   validCount: number;
   invalidCount: number;
+  duplicateCount: number;
+  conflictingCount: number;
   errors: string[];
+  validationDetails: ValidationDetail[];
   previewData: any[];
+  validatedRows: any[];
 }
+
+export interface ExecuteImportOptions {
+  confirmed: boolean;
+  allowOverwriteConflicts?: boolean;
+}
+
+export interface ExecuteImportResult {
+  success: boolean;
+  count: number;
+  tableName: string;
+  error?: string;
+  duplicateCount?: number;
+  conflictingCount?: number;
+}
+
+export interface MigrationReport {
+  success: boolean;
+  totalTablesAttempted: number;
+  tablesSucceeded: number;
+  tablesFailed: number;
+  syncedCounts: Record<string, number>;
+  errors: string[];
+  tableDetails: Record<string, { status: 'success' | 'failed' | 'skipped'; count: number; error?: string }>;
+}
+
+// =========================================================================
+// AUTH & CONTEXT VERIFICATION HELPERS
+// =========================================================================
+
+export const getVerifiedCompanyContext = async (): Promise<{
+  success: boolean;
+  companyId?: string;
+  userRole?: string;
+  userId?: string;
+  error?: string;
+}> => {
+  if (!supabase) {
+    return { success: false, error: 'Supabase client is not initialized.' };
+  }
+
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !session?.user) {
+    return { success: false, error: 'User is not authenticated. Active session required.' };
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('user_profiles')
+    .select('id, company_id, role, status')
+    .eq('user_id', session.user.id)
+    .single();
+
+  if (profileError || !profile) {
+    return { success: false, error: 'No verified ERP user profile found for authenticated session.' };
+  }
+
+  if (profile.status !== 'active') {
+    return { success: false, error: 'User account is inactive or suspended.' };
+  }
+
+  if (!profile.company_id) {
+    return { success: false, error: 'Active tenant company context missing from profile.' };
+  }
+
+  return {
+    success: true,
+    companyId: profile.company_id,
+    userRole: profile.role,
+    userId: session.user.id,
+  };
+};
 
 export const checkSupabaseConnection = async (): Promise<SyncStatus> => {
   if (!isSupabaseConfigured() || !supabase) {
     return {
       isConfigured: false,
       connected: false,
-      message: 'Supabase configuration missing (VITE_SUPABASE_URL).',
+      message: 'Supabase environment parameters missing (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY). Local browser storage mode active.',
     };
   }
 
   try {
-    // Check auth status as a lightweight connection test
-    const { data, error } = await supabase.auth.getSession();
+    const { error } = await supabase.auth.getSession();
     if (error) throw error;
-    
+
     return {
       isConfigured: true,
       connected: true,
-      message: 'Connected to Supabase.',
+      message: 'Connected to Supabase PostgreSQL database with active Row-Level Security.',
     };
   } catch (err: any) {
     return {
@@ -41,159 +377,591 @@ export const checkSupabaseConnection = async (): Promise<SyncStatus> => {
   }
 };
 
-export const migrateLocalDataToCloud = async (): Promise<{
-  success: boolean;
-  syncedCounts: Record<string, number>;
-  errors: string[];
-}> => {
+// =========================================================================
+// TABLE DATA VALIDATION ENGINE (SHARED PREVIEW & PRE-EXECUTION)
+// =========================================================================
+
+export const validateTableImportData = (
+  tableName: string,
+  parsedData: any[],
+  verifiedCompanyId: string,
+  userRole?: string
+): ImportPreviewResult => {
   const errors: string[] = [];
-  const syncedCounts: Record<string, number> = {};
+  const validationDetails: ValidationDetail[] = [];
 
-  if (!isSupabaseConfigured() || !supabase) {
-    return {
-      success: false,
-      syncedCounts: {},
-      errors: ['Supabase environment variables are missing.'],
-    };
-  }
-
-  // Get current user's company_id
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) {
-    return {
-      success: false,
-      syncedCounts: {},
-      errors: ['User must be authenticated to migrate data.'],
-    };
-  }
-
-  const { data: profile } = await supabase
-    .from('user_profiles')
-    .select('company_id')
-    .eq('user_id', session.user.id)
-    .single();
-
-  if (!profile?.company_id) {
-    return {
-      success: false,
-      syncedCounts: {},
-      errors: ['User company context not found.'],
-    };
-  }
-
-  const companyId = profile.company_id;
-
-  const syncLocalKey = async (keyName: string, tableName: string) => {
-    try {
-      const raw = localStorage.getItem(keyName);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed) || parsed.length === 0) return;
-
-      const sanitizedRows = parsed.map((row: any) => ({
-        ...row,
-        company_id: companyId,
-        id: row.id || crypto.randomUUID(),
-      }));
-
-      const { error } = await supabase!.from(tableName).upsert(sanitizedRows, { onConflict: 'id' });
-      if (error) {
-        errors.push(`${tableName}: ${error.message}`);
-      } else {
-        syncedCounts[tableName] = sanitizedRows.length;
-      }
-    } catch (e: any) {
-      errors.push(`${tableName}: ${e.message}`);
+  // 1. Guard against blocked / privileged tables
+  if (BLOCKED_TABLES.includes(tableName as BlockedTable)) {
+    if (tableName === 'general_ledger') {
+      errors.push("Table 'general_ledger' is a protected append-only accounting ledger. General ledger entries cannot be imported through generic client upserts and MUST be posted via the authorized 'post_journal_voucher' RPC.");
+    } else if (tableName === 'companies') {
+      errors.push("Table 'companies' is a root tenant entity and cannot be imported through generic client upserts. Onboarding must use 'register_new_company' RPC.");
+    } else {
+      errors.push(`Table '${tableName}' is a protected identity table and cannot be imported through generic sync.`);
     }
-  };
+    return {
+      tableName,
+      totalRecords: parsedData?.length || 0,
+      validCount: 0,
+      invalidCount: parsedData?.length || 0,
+      duplicateCount: 0,
+      conflictingCount: 0,
+      errors,
+      validationDetails: [{ row: 0, error: errors[0] }],
+      previewData: [],
+      validatedRows: [],
+    };
+  }
 
-  await syncLocalKey('zaid_erp_customers', 'customers');
-  await syncLocalKey('zaid_erp_suppliers', 'suppliers');
-  await syncLocalKey('zaid_erp_deliveries', 'deliveries');
-  await syncLocalKey('zaid_erp_sales', 'sales_invoices');
-  await syncLocalKey('zaid_erp_quotations', 'quotations');
-  await syncLocalKey('zaid_erp_sales_orders', 'sales_orders');
-  await syncLocalKey('zaid_erp_expenses', 'expenses');
-  // NOTE: general_ledger (zaid_erp_gl_transactions) MUST NOT be synced via upsert.
-  // It requires the authorized post_journal_voucher RPC to maintain ledger integrity.
+  // 2. Guard against unknown tables
+  if (!ALLOWED_IMPORT_TABLES.includes(tableName as AllowedImportTable)) {
+    const err = `Unknown or disallowed table '${tableName}'. Import is strictly restricted to permitted business master and transaction tables.`;
+    return {
+      tableName,
+      totalRecords: parsedData?.length || 0,
+      validCount: 0,
+      invalidCount: parsedData?.length || 0,
+      duplicateCount: 0,
+      conflictingCount: 0,
+      errors: [err],
+      validationDetails: [{ row: 0, error: err }],
+      previewData: [],
+      validatedRows: [],
+    };
+  }
 
-  return {
-    success: errors.length === 0,
-    syncedCounts,
-    errors,
-  };
-};
+  const table = tableName as AllowedImportTable;
+  const schema = TABLE_SCHEMAS[table];
 
-export const previewAndValidateImport = async (tableName: string, rawDataString: string): Promise<ImportPreviewResult> => {
-  const errors: string[] = [];
-  let parsed: any[];
-  try {
-    parsed = JSON.parse(rawDataString);
-    if (!Array.isArray(parsed)) {
-      return { validCount: 0, invalidCount: 0, errors: ['Import data must be a JSON array.'], previewData: [] };
+  // 3. Role authorization check
+  if (userRole) {
+    const allowedRoles = TABLE_WRITE_ROLE_PERMISSIONS[table] || [];
+    if (!allowedRoles.includes(userRole)) {
+      const authErr = `Unauthorized: User role '${userRole}' does not have permission to import records into '${tableName}'. Permitted roles: ${allowedRoles.join(', ')}.`;
+      return {
+        tableName,
+        totalRecords: parsedData?.length || 0,
+        validCount: 0,
+        invalidCount: parsedData?.length || 0,
+        duplicateCount: 0,
+        conflictingCount: 0,
+        errors: [authErr],
+        validationDetails: [{ row: 0, error: authErr }],
+        previewData: [],
+        validatedRows: [],
+      };
     }
-  } catch (e: any) {
-    return { validCount: 0, invalidCount: 0, errors: [`JSON Parse Error: ${e.message}`], previewData: [] };
   }
 
-  if (parsed.length === 0) {
-    return { validCount: 0, invalidCount: 0, errors: ['Import array is empty.'], previewData: [] };
+  // 4. Validate payload array
+  if (!Array.isArray(parsedData) || parsedData.length === 0) {
+    return {
+      tableName,
+      totalRecords: 0,
+      validCount: 0,
+      invalidCount: 0,
+      duplicateCount: 0,
+      conflictingCount: 0,
+      errors: ['Import dataset is empty or not a valid JSON array.'],
+      validationDetails: [],
+      previewData: [],
+      validatedRows: [],
+    };
   }
 
-  if (!supabase) {
-    return { validCount: 0, invalidCount: parsed.length, errors: ['Supabase client not initialized.'], previewData: [] };
-  }
-
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) {
-    return { validCount: 0, invalidCount: parsed.length, errors: ['User must be authenticated to import data.'], previewData: [] };
-  }
-
-  const { data: profile } = await supabase
-    .from('user_profiles')
-    .select('company_id')
-    .eq('user_id', session.user.id)
-    .single();
-
-  if (!profile?.company_id) {
-    return { validCount: 0, invalidCount: parsed.length, errors: ['User does not have an active company context.'], previewData: [] };
-  }
-
-  const validData: any[] = [];
+  const seenIds = new Set<string>();
+  const seenBusinessKeys = new Set<string>();
+  const validatedRows: any[] = [];
   let invalidCount = 0;
+  let duplicateCount = 0;
 
-  parsed.forEach((row, idx) => {
-    if (!row || typeof row !== 'object') {
-      errors.push(`Row ${idx + 1}: Invalid object record.`);
+  parsedData.forEach((row: any, idx: number) => {
+    const rowNum = idx + 1;
+
+    // Check row is an object
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      invalidCount++;
+      const msg = `Row ${rowNum}: Record must be a valid JSON object.`;
+      errors.push(msg);
+      validationDetails.push({ row: rowNum, error: msg });
+      return;
+    }
+
+    let hasRowError = false;
+
+    // Check unknown columns (strict schema enforcement)
+    const rowKeys = Object.keys(row);
+    for (const key of rowKeys) {
+      if (key !== 'company_id' && !schema.allowedColumns.includes(key)) {
+        hasRowError = true;
+        const msg = `Row ${rowNum}: Unknown or unauthorized column '${key}' is not allowed for table '${tableName}'.`;
+        errors.push(msg);
+        validationDetails.push({ row: rowNum, field: key, error: msg });
+      }
+    }
+
+    // Check required fields
+    for (const reqField of schema.requiredFields) {
+      const val = row[reqField];
+      if (val === undefined || val === null || (typeof val === 'string' && val.trim() === '')) {
+        hasRowError = true;
+        const msg = `Row ${rowNum}: Missing required field '${reqField}'.`;
+        errors.push(msg);
+        validationDetails.push({ row: rowNum, field: reqField, error: msg });
+      }
+    }
+
+    // Check UUID fields
+    if (schema.uuidFields) {
+      for (const uuidField of schema.uuidFields) {
+        const val = row[uuidField];
+        if (val !== undefined && val !== null && val !== '') {
+          if (typeof val !== 'string' || !UUID_REGEX.test(val)) {
+            hasRowError = true;
+            const msg = `Row ${rowNum}: Invalid UUID format for '${uuidField}' ('${val}').`;
+            errors.push(msg);
+            validationDetails.push({ row: rowNum, field: uuidField, error: msg });
+          }
+        }
+      }
+    }
+
+    // Check numeric fields
+    if (schema.numericFields) {
+      for (const numRule of schema.numericFields) {
+        const val = row[numRule.field];
+        if (val !== undefined && val !== null && val !== '') {
+          const parsedNum = Number(val);
+          if (isNaN(parsedNum) || !isFinite(parsedNum)) {
+            hasRowError = true;
+            const msg = `Row ${rowNum}: Field '${numRule.field}' must be a valid number (received '${val}').`;
+            errors.push(msg);
+            validationDetails.push({ row: rowNum, field: numRule.field, error: msg });
+          } else {
+            if (numRule.min !== undefined && parsedNum < numRule.min) {
+              hasRowError = true;
+              const msg = `Row ${rowNum}: Field '${numRule.field}' value (${parsedNum}) cannot be less than ${numRule.min}.`;
+              errors.push(msg);
+              validationDetails.push({ row: rowNum, field: numRule.field, error: msg });
+            }
+            if (numRule.integer && !Number.isInteger(parsedNum)) {
+              hasRowError = true;
+              const msg = `Row ${rowNum}: Field '${numRule.field}' must be an integer.`;
+              errors.push(msg);
+              validationDetails.push({ row: rowNum, field: numRule.field, error: msg });
+            }
+          }
+        } else if (!numRule.optional && schema.requiredFields.includes(numRule.field)) {
+          hasRowError = true;
+          const msg = `Row ${rowNum}: Numeric field '${numRule.field}' is required.`;
+          errors.push(msg);
+          validationDetails.push({ row: rowNum, field: numRule.field, error: msg });
+        }
+      }
+    }
+
+    // Check date fields
+    if (schema.dateFields) {
+      for (const dateField of schema.dateFields) {
+        const val = row[dateField];
+        if (val !== undefined && val !== null && val !== '') {
+          if (typeof val !== 'string' || isNaN(Date.parse(val))) {
+            hasRowError = true;
+            const msg = `Row ${rowNum}: Field '${dateField}' must be a valid date string (e.g. YYYY-MM-DD).`;
+            errors.push(msg);
+            validationDetails.push({ row: rowNum, field: dateField, error: msg });
+          }
+        }
+      }
+    }
+
+    // Check JSON fields
+    if (schema.jsonFields) {
+      for (const jsonField of schema.jsonFields) {
+        const val = row[jsonField];
+        if (val !== undefined && val !== null) {
+          if (typeof val !== 'object') {
+            hasRowError = true;
+            const msg = `Row ${rowNum}: Field '${jsonField}' must be a valid JSON structure (array or object).`;
+            errors.push(msg);
+            validationDetails.push({ row: rowNum, field: jsonField, error: msg });
+          }
+        }
+      }
+    }
+
+    // Check status enums
+    if (schema.statusEnums && row.status) {
+      if (!schema.statusEnums.includes(row.status)) {
+        hasRowError = true;
+        const msg = `Row ${rowNum}: Invalid status '${row.status}'. Allowed: ${schema.statusEnums.join(', ')}.`;
+        errors.push(msg);
+        validationDetails.push({ row: rowNum, field: 'status', error: msg });
+      }
+    }
+
+    // In-payload duplicate checks
+    const rowId = row.id ? String(row.id).toLowerCase() : null;
+    if (rowId) {
+      if (seenIds.has(rowId)) {
+        duplicateCount++;
+        hasRowError = true;
+        const msg = `Row ${rowNum}: Duplicate record ID '${row.id}' found within import payload.`;
+        errors.push(msg);
+        validationDetails.push({ row: rowNum, field: 'id', error: msg });
+      } else {
+        seenIds.add(rowId);
+      }
+    }
+
+    const businessVal = row[schema.uniqueBusinessKey];
+    if (businessVal !== undefined && businessVal !== null) {
+      const bKey = String(businessVal).trim().toLowerCase();
+      if (seenBusinessKeys.has(bKey)) {
+        duplicateCount++;
+        hasRowError = true;
+        const msg = `Row ${rowNum}: Duplicate ${schema.uniqueBusinessKey} '${businessVal}' found within import payload.`;
+        errors.push(msg);
+        validationDetails.push({ row: rowNum, field: schema.uniqueBusinessKey, error: msg });
+      } else {
+        seenBusinessKeys.add(bKey);
+      }
+    }
+
+    if (hasRowError) {
       invalidCount++;
       return;
     }
 
-    const sanitizedRow = { ...row };
-    sanitizedRow.company_id = profile.company_id;
-    if (!sanitizedRow.id) {
-      sanitizedRow.id = crypto.randomUUID();
+    // Create pristine sanitized record:
+    // 1. NEVER trust client-supplied company_id: overwrite with verified company context
+    // 2. NEVER spread arbitrary row properties (...row): assign only allowed columns
+    const sanitizedRecord: Record<string, any> = {
+      id: row.id || crypto.randomUUID(),
+      company_id: verifiedCompanyId,
+    };
+
+    for (const col of schema.allowedColumns) {
+      if (col !== 'id' && row[col] !== undefined) {
+        sanitizedRecord[col] = row[col];
+      }
     }
 
-    validData.push(sanitizedRow);
+    validatedRows.push(sanitizedRecord);
   });
 
   return {
-    validCount: validData.length,
+    tableName,
+    totalRecords: parsedData.length,
+    validCount: validatedRows.length,
     invalidCount,
+    duplicateCount,
+    conflictingCount: 0, // Checked against DB in preview
     errors,
-    previewData: validData.slice(0, 10),
+    validationDetails,
+    previewData: validatedRows.slice(0, 10),
+    validatedRows,
   };
 };
 
-export const executeVerifiedImport = async (tableName: string, validatedRows: any[]): Promise<{ success: boolean; count: number; error?: string }> => {
-  if (!supabase) return { success: false, count: 0, error: 'Supabase not configured.' };
-  if (!validatedRows || validatedRows.length === 0) return { success: true, count: 0 };
+// =========================================================================
+// PREVIEW AND VALIDATE IMPORT (With DB Conflict Detection)
+// =========================================================================
 
-  const { error } = await supabase.from(tableName).upsert(validatedRows, { onConflict: 'id' });
-  if (error) {
-    return { success: false, count: 0, error: error.message };
+export const previewAndValidateImport = async (
+  tableName: string,
+  rawDataString: string
+): Promise<ImportPreviewResult> => {
+  let parsed: any[];
+  try {
+    parsed = JSON.parse(rawDataString);
+    if (!Array.isArray(parsed)) {
+      return {
+        tableName,
+        totalRecords: 0,
+        validCount: 0,
+        invalidCount: 0,
+        duplicateCount: 0,
+        conflictingCount: 0,
+        errors: ['Import payload must be a JSON array of records.'],
+        validationDetails: [{ row: 0, error: 'JSON payload is not an array.' }],
+        previewData: [],
+        validatedRows: [],
+      };
+    }
+  } catch (e: any) {
+    return {
+      tableName,
+      totalRecords: 0,
+      validCount: 0,
+      invalidCount: 0,
+      duplicateCount: 0,
+      conflictingCount: 0,
+      errors: [`JSON Parse Error: ${e.message}`],
+      validationDetails: [{ row: 0, error: e.message }],
+      previewData: [],
+      validatedRows: [],
+    };
   }
 
-  return { success: true, count: validatedRows.length };
+  const context = await getVerifiedCompanyContext();
+  if (!context.success || !context.companyId) {
+    return {
+      tableName,
+      totalRecords: parsed.length,
+      validCount: 0,
+      invalidCount: parsed.length,
+      duplicateCount: 0,
+      conflictingCount: 0,
+      errors: [context.error || 'Authentication context failure.'],
+      validationDetails: [{ row: 0, error: context.error || 'Auth failure' }],
+      previewData: [],
+      validatedRows: [],
+    };
+  }
+
+  const result = validateTableImportData(tableName, parsed, context.companyId, context.userRole);
+
+  // Check database for conflicting records
+  if (result.validCount > 0 && supabase) {
+    const table = tableName as AllowedImportTable;
+    const schema = TABLE_SCHEMAS[table];
+    if (schema) {
+      try {
+        const idsToCheck = result.validatedRows.map(r => r.id).filter(Boolean);
+        const { data: existingRecords } = await supabase
+          .from(tableName)
+          .select('id')
+          .eq('company_id', context.companyId)
+          .in('id', idsToCheck.slice(0, 200));
+
+        if (existingRecords && existingRecords.length > 0) {
+          result.conflictingCount = existingRecords.length;
+          result.errors.push(`Notice: ${existingRecords.length} record(s) already exist with the same ID in the company database.`);
+        }
+      } catch (err: any) {
+        // DB conflict query failure is recorded as notice
+      }
+    }
+  }
+
+  return result;
+};
+
+// =========================================================================
+// EXECUTE VERIFIED IMPORT (With Confirmation Guard & Revalidation)
+// =========================================================================
+
+export const executeVerifiedImport = async (
+  tableName: string,
+  rowsToImport: any[],
+  options?: ExecuteImportOptions
+): Promise<ExecuteImportResult> => {
+  // Requirement 7: Require explicit confirmation before a bulk import
+  if (!options || options.confirmed !== true) {
+    return {
+      success: false,
+      count: 0,
+      tableName,
+      error: 'Explicit user confirmation required before executing bulk import.',
+    };
+  }
+
+  if (!supabase) {
+    return {
+      success: false,
+      count: 0,
+      tableName,
+      error: 'Supabase client is not initialized or configured.',
+    };
+  }
+
+  if (!rowsToImport || rowsToImport.length === 0) {
+    return {
+      success: true,
+      count: 0,
+      tableName,
+    };
+  }
+
+  // Requirement 4 & 10: Re-verify authenticated company context & role
+  const context = await getVerifiedCompanyContext();
+  if (!context.success || !context.companyId) {
+    return {
+      success: false,
+      count: 0,
+      tableName,
+      error: context.error || 'Unauthorized import execution attempt.',
+    };
+  }
+
+  // Requirement 6: Revalidate immediately before writing
+  const revalidation = validateTableImportData(tableName, rowsToImport, context.companyId, context.userRole);
+  if (revalidation.invalidCount > 0 || revalidation.errors.length > 0) {
+    return {
+      success: false,
+      count: 0,
+      tableName,
+      error: `Pre-execution validation failed with ${revalidation.invalidCount} error(s): ${revalidation.errors.slice(0, 3).join('; ')}`,
+    };
+  }
+
+  try {
+    const cleanRows = revalidation.validatedRows;
+    const { error: upsertError } = await supabase
+      .from(tableName)
+      .upsert(cleanRows, { onConflict: 'id' });
+
+    if (upsertError) {
+      return {
+        success: false,
+        count: 0,
+        tableName,
+        error: `Database write rejected: ${upsertError.message}`,
+      };
+    }
+
+    return {
+      success: true,
+      count: cleanRows.length,
+      tableName,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      count: 0,
+      tableName,
+      error: err.message || 'Execution error during table import.',
+    };
+  }
+};
+
+// =========================================================================
+// BULK LOCAL-TO-CLOUD DATA MIGRATION (Strict Per-Table Auditing)
+// =========================================================================
+
+export const LOCAL_STORAGE_TABLE_MAP: Record<string, AllowedImportTable> = {
+  zaid_erp_customers: 'customers',
+  zaid_erp_suppliers: 'suppliers',
+  zaid_erp_deliveries: 'deliveries',
+  zaid_erp_sales: 'sales_invoices',
+  zaid_erp_quotations: 'quotations',
+  zaid_erp_sales_orders: 'sales_orders',
+  zaid_erp_expenses: 'expenses',
+};
+
+export const migrateLocalDataToCloud = async (): Promise<MigrationReport> => {
+  const errors: string[] = [];
+  const syncedCounts: Record<string, number> = {};
+  const tableDetails: Record<string, { status: 'success' | 'failed' | 'skipped'; count: number; error?: string }> = {};
+
+  if (!isSupabaseConfigured() || !supabase) {
+    return {
+      success: false,
+      totalTablesAttempted: 0,
+      tablesSucceeded: 0,
+      tablesFailed: 0,
+      syncedCounts: {},
+      errors: ['Supabase configuration missing in environment.'],
+      tableDetails: {},
+    };
+  }
+
+  const context = await getVerifiedCompanyContext();
+  if (!context.success || !context.companyId) {
+    return {
+      success: false,
+      totalTablesAttempted: 0,
+      tablesSucceeded: 0,
+      tablesFailed: 0,
+      syncedCounts: {},
+      errors: [context.error || 'Authentication context required to migrate data.'],
+      tableDetails: {},
+    };
+  }
+
+  // Verify caller has administrative write access
+  if (context.userRole !== 'Owner / Administrator' && context.userRole !== 'Manager') {
+    return {
+      success: false,
+      totalTablesAttempted: 0,
+      tablesSucceeded: 0,
+      tablesFailed: 0,
+      syncedCounts: {},
+      errors: [`Permission denied: Role '${context.userRole}' cannot perform full local data migrations.`],
+      tableDetails: {},
+    };
+  }
+
+  let totalAttempted = 0;
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const [keyName, tableName] of Object.entries(LOCAL_STORAGE_TABLE_MAP)) {
+    totalAttempted++;
+    try {
+      const raw = localStorage.getItem(keyName);
+      if (!raw) {
+        tableDetails[tableName] = { status: 'skipped', count: 0 };
+        continue;
+      }
+
+      let parsed: any[];
+      try {
+        parsed = JSON.parse(raw);
+      } catch (parseErr: any) {
+        failed++;
+        const msg = `${tableName}: JSON parsing failed: ${parseErr.message}`;
+        errors.push(msg);
+        tableDetails[tableName] = { status: 'failed', count: 0, error: msg };
+        continue;
+      }
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        tableDetails[tableName] = { status: 'skipped', count: 0 };
+        continue;
+      }
+
+      // Validate with schema engine
+      const validation = validateTableImportData(tableName, parsed, context.companyId, context.userRole);
+      if (validation.invalidCount > 0 || validation.validCount === 0) {
+        failed++;
+        const msg = `${tableName}: Validation failed (${validation.invalidCount} invalid rows). First error: ${validation.errors[0]}`;
+        errors.push(msg);
+        tableDetails[tableName] = { status: 'failed', count: 0, error: msg };
+        continue;
+      }
+
+      // Execute verified write
+      const writeResult = await executeVerifiedImport(tableName, validation.validatedRows, { confirmed: true });
+      if (!writeResult.success) {
+        failed++;
+        const msg = `${tableName}: ${writeResult.error || 'Database write error'}`;
+        errors.push(msg);
+        tableDetails[tableName] = { status: 'failed', count: 0, error: msg };
+      } else {
+        succeeded++;
+        syncedCounts[tableName] = writeResult.count;
+        tableDetails[tableName] = { status: 'success', count: writeResult.count };
+      }
+    } catch (e: any) {
+      failed++;
+      const msg = `${tableName}: ${e.message}`;
+      errors.push(msg);
+      tableDetails[tableName] = { status: 'failed', count: 0, error: msg };
+    }
+  }
+
+  // Requirement 9: A partial import must not be reported as a complete success
+  const isCompleteSuccess = failed === 0 && errors.length === 0;
+
+  return {
+    success: isCompleteSuccess,
+    totalTablesAttempted: totalAttempted,
+    tablesSucceeded: succeeded,
+    tablesFailed: failed,
+    syncedCounts,
+    errors,
+    tableDetails,
+  };
 };

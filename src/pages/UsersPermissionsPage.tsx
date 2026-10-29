@@ -46,7 +46,7 @@ export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = () => {
           <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="font-semibold text-slate-900 dark:text-neutral-100 truncate">{r.name}</span>
-              {r.id === currentUser.id && (
+              {currentUser && r.id === currentUser.id && (
                 <span className="text-[10px] bg-[#167a53]/15 text-[#167a53] dark:text-[#34d399] font-bold px-1.5 py-0.2 rounded">
                   YOU
                 </span>
@@ -110,7 +110,7 @@ export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = () => {
           variant="outline"
           size="sm"
           onClick={() => setSelectedUserToEdit(r)}
-          disabled={!isSuperAdmin && r.id !== currentUser.id}
+          disabled={!isSuperAdmin && (!currentUser || r.id !== currentUser.id)}
           leftIcon={<Edit2 className="w-3 h-3" />}
         >
           Manage
@@ -125,7 +125,7 @@ export const UsersPermissionsPage: React.FC<UsersPermissionsPageProps> = () => {
     { role: 'Salesperson', desc: 'Can generate quotations, post invoices within assigned customer credit terms.', permissions: ['Sales', 'Customers (Read/Write)', 'Inventory (View)'] },
     { role: 'Storekeeper', desc: 'Authorized to execute Goods Receipt Notes (GRN), warehouse bin transfers, and stock adjustments.', permissions: ['Inventory', 'Purchasing (Receiving only)'] },
     { role: 'Accountant', desc: 'General ledger postings, customer receipts, supplier voucher payments, trial balance, and tax reconciliation.', permissions: ['Finance', 'Expenses', 'Reports', 'Sales (Read)'] },
-    { role: 'Delivery Driver', desc: 'Mobile van inventory sales, customer proof-of-delivery receipts, and daily cash collection remittance.', permissions: ['Delivery & Van Sales', 'Customer Receipts'] },
+    { role: 'Delivery Driver', desc: 'Responsible for warehouse delivery fulfillment and proof-of-delivery documentation.', permissions: ['Delivery', 'Proof of Delivery'] },
   ];
 
   return (

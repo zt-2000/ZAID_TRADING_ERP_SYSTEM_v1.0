@@ -48,9 +48,9 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, u
 
   if (!user) return null;
 
-  const isSelf = user.id === currentUser.id;
+  const isSelf = Boolean(currentUser && user.id === currentUser.id);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError('Staff member full name is required.');
@@ -64,8 +64,8 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, u
     setIsSaving(true);
     setError(null);
 
-    setTimeout(() => {
-      const res = updateUser(user.id, {
+    try {
+      const res = await updateUser(user.id, {
         name: name.trim(),
         displayName: displayName.trim() || name.trim(),
         email: email.trim().toLowerCase(),
@@ -83,31 +83,43 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, u
       } else {
         setError(res.message);
       }
-    }, 300);
-  };
-
-  const handleToggleStatus = () => {
-    const res = toggleUserStatus(user.id);
-    if (res.success) {
-      showToast('Status Updated', res.message, 'success');
-      setStatus((prev) => (prev === 'active' ? 'inactive' : 'active'));
-    } else {
-      setError(res.message);
+    } catch (err: any) {
+      setIsSaving(false);
+      setError(err?.message || 'Failed to update user.');
     }
   };
 
-  const handleDelete = () => {
+  const handleToggleStatus = async () => {
+    try {
+      const res = await toggleUserStatus(user.id);
+      if (res.success) {
+        showToast('Status Updated', res.message, 'success');
+        setStatus((prev) => (prev === 'active' ? 'inactive' : 'active'));
+      } else {
+        setError(res.message);
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to toggle status.');
+    }
+  };
+
+  const handleDelete = async () => {
     if (!confirmDelete) {
       setConfirmDelete(true);
       return;
     }
 
-    const res = deleteUser(user.id);
-    if (res.success) {
-      showToast('Account Removed', res.message, 'info');
-      onClose();
-    } else {
-      setError(res.message);
+    try {
+      const res = await deleteUser(user.id);
+      if (res.success) {
+        showToast('Account Removed', res.message, 'info');
+        onClose();
+      } else {
+        setError(res.message);
+        setConfirmDelete(false);
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to delete user.');
       setConfirmDelete(false);
     }
   };

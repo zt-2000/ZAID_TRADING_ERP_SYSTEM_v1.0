@@ -59,7 +59,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
     reader.readAsDataURL(file);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError('Full name is required.');
@@ -69,8 +69,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
     setIsSaving(true);
     setError(null);
 
-    setTimeout(() => {
-      const res = updateCurrentUser({
+    try {
+      const res = await updateCurrentUser({
         name: name.trim(),
         displayName: displayName.trim() || name.trim(),
         phone: phone.trim(),
@@ -86,7 +86,10 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
       } else {
         setError(res.message || 'Failed to update profile.');
       }
-    }, 400);
+    } catch (err: any) {
+      setIsSaving(false);
+      setError(err?.message || 'Failed to update profile.');
+    }
   };
 
   return (

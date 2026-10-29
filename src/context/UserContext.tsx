@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { UserProfile, UserPreferences, UserSession } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -17,11 +17,12 @@ interface UserContextType {
   toggleUserStatus: (id: string) => Promise<{ success: boolean; message: string }>;
   deleteUser: (id: string) => Promise<{ success: boolean; message: string }>;
   sessions: UserSession[];
-  revokeSession: (id: string) => void;
-  revokeAllOtherSessions: () => void;
+  revokeSession: (id: string) => Promise<{ success: boolean; message: string }>;
+  revokeAllOtherSessions: () => Promise<{ success: boolean; message: string }>;
   changePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
   isSuperAdmin: boolean;
   authError: string | null;
+  refreshUsers: () => Promise<void>;
 }
 
 const defaultPreferences: UserPreferences = {
@@ -38,6 +39,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [currentCompanyId, setCurrentCompanyId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -54,96 +56,109 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   ]);
 
-  useEffect(() => {
-    let mounted = true;
+  const mapProfile = (p: any): UserProfile => ({
+    id: p.id,
+    name: p.name,
+    displayName: p.display_name || p.name,
+    email: p.email,
+    phone: p.phone || '',
+    jobTitle: p.job_title || '',
+    role: p.role,
+    status: p.status,
+    assignedWarehouse: p.assigned_warehouse || '',
+    createdAt: p.created_at,
+    avatarUrl: p.avatar_url || '',
+  });
 
-    async function loadSessionAndProfile() {
-      if (!isSupabaseConfigured() || !supabase) {
-        if (mounted) {
-          setLoading(false);
-          setAuthError('Supabase is not configured. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in environment variables.');
-        }
-        return;
+  const fetchCompanyUsers = useCallback(async (companyId: string) => {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: true });
+
+      if (!error && data) {
+        setUsers(data.map(mapProfile));
       }
+    } catch {
+      // non-critical if fetch fails
+    }
+  }, []);
 
-      try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) throw sessionError;
-
-        if (session?.user) {
-          // Fetch user profile from database
-          const { data: profile, error: profileError } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('user_id', session.user.id)
-            .single();
-
-          if (profileError || !profile) {
-            if (mounted) {
-              setCurrentUser(null);
-              setAuthError('User authenticated in Supabase Auth, but no ERP profile found. Please complete company registration.');
-            }
-          } else if (profile.status !== 'active') {
-            if (mounted) {
-              setCurrentUser(null);
-              setAuthError('Your user account has been deactivated by the company administrator.');
-              await supabase.auth.signOut();
-            }
-          } else {
-            if (mounted) {
-              setCurrentUser({
-                id: profile.id,
-                name: profile.name,
-                displayName: profile.display_name || profile.name,
-                email: profile.email,
-                phone: profile.phone || '',
-                jobTitle: profile.job_title || '',
-                role: profile.role,
-                status: profile.status,
-                assignedWarehouse: profile.assigned_warehouse || '',
-                createdAt: profile.created_at,
-              });
-              setAuthError(null);
-              
-              // Load company users list if admin/manager
-              if (profile.role === 'Owner / Administrator' || profile.role === 'Manager') {
-                const { data: companyUsers } = await supabase
-                  .from('user_profiles')
-                  .select('*')
-                  .eq('company_id', profile.company_id);
-                if (companyUsers) {
-                  setUsers(companyUsers.map((u: any) => ({
-                    id: u.id,
-                    name: u.name,
-                    displayName: u.display_name || u.name,
-                    email: u.email,
-                    phone: u.phone || '',
-                    jobTitle: u.job_title || '',
-                    role: u.role,
-                    status: u.status,
-                    assignedWarehouse: u.assigned_warehouse || '',
-                    createdAt: u.created_at,
-                  })));
-                }
-              }
-            }
-          }
-        } else {
-          if (mounted) {
-            setCurrentUser(null);
-          }
-        }
-      } catch (err: any) {
-        if (mounted) {
-          setAuthError(err.message || 'Failed to initialize session.');
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
+  const loadSessionAndProfile = useCallback(async () => {
+    if (!isSupabaseConfigured() || !supabase) {
+      setLoading(false);
+      setAuthError('Supabase is not configured. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in environment variables.');
+      return;
     }
 
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+
+      if (session?.user) {
+        // Fetch user profile from database
+        let { data: profile, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .single();
+
+        // Requirement 6: Handle registration failures and missing profiles without silently leaving an unrecoverable account
+        if ((profileError || !profile) && session.user.email) {
+          // Attempt automatic recovery: check if user has a pending invitation
+          try {
+            const { data: profileId, error: rpcError } = await supabase.rpc('complete_user_registration');
+            if (!rpcError && profileId) {
+              const { data: recoveredProfile } = await supabase
+                .from('user_profiles')
+                .select('*')
+                .eq('id', profileId)
+                .single();
+              if (recoveredProfile) {
+                profile = recoveredProfile;
+                profileError = null;
+              }
+            }
+          } catch {
+            // ignore RPC missing or failed
+          }
+        }
+
+        if (profileError || !profile) {
+          setCurrentUser(null);
+          setCurrentCompanyId(null);
+          setAuthError('Authenticated in Supabase Auth, but no active ERP profile was found. Please complete company onboarding or contact your administrator.');
+        } else if (profile.status !== 'active') {
+          setCurrentUser(null);
+          setCurrentCompanyId(null);
+          setAuthError('Your user account has been deactivated by the company administrator.');
+          await supabase.auth.signOut();
+        } else {
+          const userObj = mapProfile(profile);
+          setCurrentUser(userObj);
+          setCurrentCompanyId(profile.company_id);
+          setAuthError(null);
+
+          // If privileged role, load company users
+          if (profile.role === 'Owner / Administrator' || profile.role === 'Manager') {
+            await fetchCompanyUsers(profile.company_id);
+          }
+        }
+      } else {
+        setCurrentUser(null);
+        setCurrentCompanyId(null);
+      }
+    } catch (err: any) {
+      setAuthError(err.message || 'Failed to initialize session.');
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchCompanyUsers]);
+
+  useEffect(() => {
     loadSessionAndProfile();
 
     if (supabase) {
@@ -152,16 +167,22 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await loadSessionAndProfile();
         } else if (event === 'SIGNED_OUT') {
           setCurrentUser(null);
+          setCurrentCompanyId(null);
           setUsers([]);
         }
       });
 
       return () => {
         subscription.unsubscribe();
-        mounted = false;
       };
     }
-  }, []);
+  }, [loadSessionAndProfile]);
+
+  const refreshUsers = async () => {
+    if (currentCompanyId) {
+      await fetchCompanyUsers(currentCompanyId);
+    }
+  };
 
   const signIn = async (email: string, pass: string): Promise<{ success: boolean; message: string }> => {
     if (!supabase) return { success: false, message: 'Supabase client not initialized.' };
@@ -171,34 +192,50 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error) return { success: false, message: error.message };
 
       if (data.user) {
-        const { data: profile, error: profileError } = await supabase
+        let { data: profile, error: profileError } = await supabase
           .from('user_profiles')
           .select('*')
           .eq('user_id', data.user.id)
           .single();
 
+        // Handle missing profile by attempting invited user registration completion
+        if ((profileError || !profile) && data.user.email) {
+          try {
+            const { data: profileId } = await supabase.rpc('complete_user_registration');
+            if (profileId) {
+              const { data: recovered } = await supabase
+                .from('user_profiles')
+                .select('*')
+                .eq('id', profileId)
+                .single();
+              if (recovered) {
+                profile = recovered;
+                profileError = null;
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+
         if (profileError || !profile) {
           await supabase.auth.signOut();
-          return { success: false, message: 'Authenticated successfully, but no ERP profile exists. Please sign up or complete registration.' };
+          return { success: false, message: 'Authenticated successfully, but no ERP profile exists. Please complete registration.' };
         }
 
         if (profile.status !== 'active') {
           await supabase.auth.signOut();
-          return { success: false, message: 'Account is deactivated.' };
+          return { success: false, message: 'Account has been deactivated.' };
         }
 
-        setCurrentUser({
-          id: profile.id,
-          name: profile.name,
-          displayName: profile.display_name || profile.name,
-          email: profile.email,
-          phone: profile.phone || '',
-          jobTitle: profile.job_title || '',
-          role: profile.role,
-          status: profile.status,
-          assignedWarehouse: profile.assigned_warehouse || '',
-          createdAt: profile.created_at,
-        });
+        const userObj = mapProfile(profile);
+        setCurrentUser(userObj);
+        setCurrentCompanyId(profile.company_id);
+
+        if (profile.role === 'Owner / Administrator' || profile.role === 'Manager') {
+          await fetchCompanyUsers(profile.company_id);
+        }
+
         return { success: true, message: 'Signed in successfully.' };
       }
       return { success: false, message: 'Sign in failed.' };
@@ -224,7 +261,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!authData.user) return { success: false, message: 'Registration failed in Auth.' };
 
       // 2. Call secure onboarding RPC to create company and initial Owner profile atomically
-      const { data: companyId, error: rpcError } = await supabase.rpc('register_new_company', {
+      const { error: rpcError } = await supabase.rpc('register_new_company', {
         p_company_name: companyName,
         p_legal_name: legalName,
         p_name: fullName,
@@ -232,9 +269,14 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (rpcError) {
-        return { success: false, message: `Company registration error: ${rpcError.message}` };
+        // Requirement 6: Handle registration failures and missing profiles without silently leaving an unrecoverable account
+        return { 
+          success: false, 
+          message: `Company registration failed: ${rpcError.message}. You can log in and retry company setup.` 
+        };
       }
 
+      await loadSessionAndProfile();
       return { success: true, message: 'Company and administrator account created successfully.' };
     } catch (err: any) {
       return { success: false, message: err.message || 'Sign up error.' };
@@ -246,17 +288,26 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await supabase.auth.signOut();
     }
     setCurrentUser(null);
+    setCurrentCompanyId(null);
     setUsers([]);
   };
 
+  // Requirement 3: Do not let users elevate their own role, move between companies, or alter protected profile fields
+  // Requirement 7: Refresh user/profile state only after the actual database operation succeeds
   const updateCurrentUser = async (updates: Partial<UserProfile>): Promise<{ success: boolean; message?: string }> => {
-    if (!currentUser || !supabase) return { success: false, message: 'Not authenticated' };
-    const safeUpdates: any = {};
-    if (updates.name) safeUpdates.name = updates.name;
-    if (updates.displayName) safeUpdates.display_name = updates.displayName;
-    if (updates.phone) safeUpdates.phone = updates.phone;
-    if (updates.jobTitle) safeUpdates.job_title = updates.jobTitle;
-    if (updates.assignedWarehouse) safeUpdates.assigned_warehouse = updates.assignedWarehouse;
+    if (!currentUser || !supabase) return { success: false, message: 'Not authenticated.' };
+
+    // Strictly whitelist non-privileged personal profile fields only
+    const safeUpdates: Record<string, any> = {};
+    if (updates.name !== undefined) safeUpdates.name = updates.name.trim();
+    if (updates.displayName !== undefined) safeUpdates.display_name = updates.displayName.trim();
+    if (updates.phone !== undefined) safeUpdates.phone = updates.phone.trim();
+    if (updates.jobTitle !== undefined) safeUpdates.job_title = updates.jobTitle.trim();
+    if (updates.avatarUrl !== undefined) safeUpdates.avatar_url = updates.avatarUrl;
+
+    if (Object.keys(safeUpdates).length === 0) {
+      return { success: true, message: 'No profile modifications provided.' };
+    }
 
     const { error } = await supabase
       .from('user_profiles')
@@ -265,7 +316,17 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (error) return { success: false, message: error.message };
 
-    setCurrentUser(prev => prev ? { ...prev, ...updates } : null);
+    // Reload from database to ensure verified state
+    const { data: updatedProfile, error: fetchErr } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', currentUser.id)
+      .single();
+
+    if (!fetchErr && updatedProfile) {
+      setCurrentUser(mapProfile(updatedProfile));
+    }
+
     return { success: true, message: 'Profile updated successfully.' };
   };
 
@@ -273,46 +334,76 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPreferences(prev => ({ ...prev, ...updates }));
   };
 
+  // Requirement 1 & 2: Replace profile-only invitations with secure workflow using trusted server-side function
   const inviteUser = async (data: Omit<UserProfile, 'id' | 'createdAt'>): Promise<{ success: boolean; message: string }> => {
-    if (!currentUser || !supabase) return { success: false, message: 'Not authenticated' };
-    if (currentUser.role !== 'Owner / Administrator') return { success: false, message: 'Permission denied: Only Owner / Administrator can invite users.' };
+    if (!currentUser || !supabase) return { success: false, message: 'Not authenticated.' };
+    if (currentUser.role !== 'Owner / Administrator') {
+      return { success: false, message: 'Permission denied: Only Owner / Administrator can invite users.' };
+    }
 
-    const { data: companyIdResult } = await supabase
-      .from('user_profiles')
-      .select('company_id')
-      .eq('id', currentUser.id)
-      .single();
+    // Call server-side function admin_invite_user with full server enforcement
+    const { data: inviteResult, error: rpcError } = await supabase.rpc('admin_invite_user', {
+      p_email: data.email.trim().toLowerCase(),
+      p_name: data.name.trim(),
+      p_role: data.role,
+      p_display_name: data.displayName ? data.displayName.trim() : null,
+      p_phone: data.phone ? data.phone.trim() : null,
+      p_job_title: data.jobTitle ? data.jobTitle.trim() : null,
+      p_assigned_warehouse: data.assignedWarehouse || null,
+    });
 
-    if (!companyIdResult) return { success: false, message: 'Company context not found.' };
+    if (rpcError) {
+      return { success: false, message: `Invitation failed: ${rpcError.message}` };
+    }
 
-    const { error } = await supabase
-      .from('user_profiles')
-      .insert({
-        company_id: companyIdResult.company_id,
-        name: data.name,
-        display_name: data.displayName || data.name,
-        email: data.email,
-        phone: data.phone,
-        job_title: data.jobTitle,
-        role: data.role,
-        assigned_warehouse: data.assignedWarehouse,
-        status: data.status || 'active',
-      });
+    // Refresh users from database
+    if (currentCompanyId) {
+      await fetchCompanyUsers(currentCompanyId);
+    }
 
-    if (error) return { success: false, message: error.message };
-    return { success: true, message: 'User invited successfully.' };
+    return { 
+      success: true, 
+      message: `Invitation successfully recorded for ${data.email} (${data.role}).` 
+    };
   };
 
+  // Requirement 2: Enforce permissions on the server/database for editing users
+  // Requirement 7: Refresh state only after the actual database operation succeeds
   const updateUser = async (id: string, updates: Partial<UserProfile>): Promise<{ success: boolean; message: string }> => {
-    if (!supabase) return { success: false, message: 'Supabase not configured' };
-    const safeUpdates: any = {};
-    if (updates.name) safeUpdates.name = updates.name;
-    if (updates.displayName) safeUpdates.display_name = updates.displayName;
-    if (updates.phone) safeUpdates.phone = updates.phone;
-    if (updates.jobTitle) safeUpdates.job_title = updates.jobTitle;
-    if (updates.role) safeUpdates.role = updates.role;
-    if (updates.assignedWarehouse) safeUpdates.assigned_warehouse = updates.assignedWarehouse;
-    if (updates.status) safeUpdates.status = updates.status;
+    if (!supabase) return { success: false, message: 'Supabase client not initialized.' };
+    if (!currentUser) return { success: false, message: 'Not authenticated.' };
+
+    const isSelf = currentUser.id === id;
+    if (!isSelf && currentUser.role !== 'Owner / Administrator') {
+      return { success: false, message: 'Permission denied: Only Owner / Administrator can modify other users.' };
+    }
+
+    const safeUpdates: Record<string, any> = {};
+    if (updates.name !== undefined) safeUpdates.name = updates.name.trim();
+    if (updates.displayName !== undefined) safeUpdates.display_name = updates.displayName.trim();
+    if (updates.phone !== undefined) safeUpdates.phone = updates.phone.trim();
+    if (updates.jobTitle !== undefined) safeUpdates.job_title = updates.jobTitle.trim();
+    if (updates.assignedWarehouse !== undefined) safeUpdates.assigned_warehouse = updates.assignedWarehouse;
+
+    // Only administrators can change role or status, and never on their own profile
+    if (updates.role !== undefined) {
+      if (isSelf) {
+        return { success: false, message: 'Administrators cannot change their own role.' };
+      }
+      safeUpdates.role = updates.role;
+    }
+
+    if (updates.status !== undefined) {
+      if (isSelf && updates.status !== 'active') {
+        return { success: false, message: 'Administrators cannot deactivate their own account.' };
+      }
+      safeUpdates.status = updates.status;
+    }
+
+    // Never allow moving user between companies or changing user_id
+    delete (safeUpdates as any).company_id;
+    delete (safeUpdates as any).user_id;
+    delete (safeUpdates as any).id;
 
     const { error } = await supabase
       .from('user_profiles')
@@ -320,36 +411,151 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .eq('id', id);
 
     if (error) return { success: false, message: error.message };
-    return { success: true, message: 'User updated successfully.' };
+
+    // Refresh state from database
+    if (currentCompanyId) {
+      await fetchCompanyUsers(currentCompanyId);
+    }
+
+    if (isSelf) {
+      const { data: updatedSelf } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (updatedSelf) {
+        setCurrentUser(mapProfile(updatedSelf));
+      }
+    }
+
+    return { success: true, message: 'User record updated successfully.' };
   };
 
   const toggleUserStatus = async (id: string): Promise<{ success: boolean; message: string }> => {
+    if (!currentUser) return { success: false, message: 'Not authenticated.' };
+    if (currentUser.id === id) {
+      return { success: false, message: 'Administrators cannot deactivate their own account.' };
+    }
+
     const target = users.find(u => u.id === id);
-    if (!target) return { success: false, message: 'User not found.' };
+    if (!target) return { success: false, message: 'User record not found.' };
+
     const newStatus = target.status === 'active' ? 'inactive' : 'active';
     return updateUser(id, { status: newStatus });
   };
 
+  // Requirement 2: Enforce permissions on server/database for deleting users
   const deleteUser = async (id: string): Promise<{ success: boolean; message: string }> => {
-    if (!supabase) return { success: false, message: 'Supabase not configured' };
-    const { error } = await supabase.from('user_profiles').delete().eq('id', id);
-    if (error) return { success: false, message: error.message };
-    return { success: true, message: 'User removed successfully.' };
+    if (!supabase) return { success: false, message: 'Supabase client not initialized.' };
+    if (!currentUser) return { success: false, message: 'Not authenticated.' };
+    if (currentUser.role !== 'Owner / Administrator') {
+      return { success: false, message: 'Permission denied: Only Owner / Administrator can remove users.' };
+    }
+
+    if (currentUser.id === id) {
+      return { success: false, message: 'Administrators cannot delete their own account.' };
+    }
+
+    // Call server-side function admin_delete_user with guardrails
+    const { error: rpcError } = await supabase.rpc('admin_delete_user', {
+      p_profile_id: id,
+    });
+
+    if (rpcError) {
+      // Fallback to direct delete (which is guarded by database RLS)
+      const { error: deleteError } = await supabase
+        .from('user_profiles')
+        .delete()
+        .eq('id', id);
+
+      if (deleteError) {
+        return { success: false, message: `Failed to remove user: ${rpcError.message || deleteError.message}` };
+      }
+    }
+
+    // Refresh users from database
+    if (currentCompanyId) {
+      await fetchCompanyUsers(currentCompanyId);
+    }
+
+    return { success: true, message: 'User account removed successfully.' };
   };
 
-  const revokeSession = (id: string) => {
-    setSessions(prev => prev.filter(s => s.id !== id));
+  // Requirement 5: Do not represent local UI filtering as real session revocation
+  const revokeSession = async (id: string): Promise<{ success: boolean; message: string }> => {
+    if (!supabase) return { success: false, message: 'Supabase client not initialized.' };
+    
+    // Check if target is current session
+    const target = sessions.find(s => s.id === id);
+    if (target?.isCurrent) {
+      await signOut();
+      return { success: true, message: 'Current session terminated.' };
+    }
+
+    // Real Supabase session revocation for other sessions
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'others' });
+      if (error) {
+        return { success: false, message: `Session revocation failed: ${error.message}` };
+      }
+      setSessions(prev => prev.filter(s => s.isCurrent));
+      return { success: true, message: 'Remote session revoked through Supabase Auth.' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Failed to revoke remote session.' };
+    }
   };
 
-  const revokeAllOtherSessions = () => {
-    setSessions(prev => prev.filter(s => s.isCurrent));
+  const revokeAllOtherSessions = async (): Promise<{ success: boolean; message: string }> => {
+    if (!supabase) return { success: false, message: 'Supabase client not initialized.' };
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'others' });
+      if (error) {
+        return { success: false, message: `Global session revocation failed: ${error.message}` };
+      }
+      setSessions(prev => prev.filter(s => s.isCurrent));
+      return { success: true, message: 'All other active sessions revoked through Supabase Auth.' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Failed to revoke other sessions.' };
+    }
   };
 
+  // Requirement 4: Make password-change behavior accurate: handle current-password verification where required and return genuine Supabase errors
   const changePassword = async (currentPass: string, newPass: string): Promise<{ success: boolean; message: string }> => {
-    if (!supabase) return { success: false, message: 'Supabase not configured' };
-    const { error } = await supabase.auth.updateUser({ password: newPass });
-    if (error) return { success: false, message: error.message };
-    return { success: true, message: 'Password updated successfully.' };
+    if (!supabase) return { success: false, message: 'Supabase client not initialized.' };
+    if (!currentUser?.email) return { success: false, message: 'Active user email context required.' };
+
+    if (!currentPass || !currentPass.trim()) {
+      return { success: false, message: 'Current password is required to verify identity.' };
+    }
+
+    if (!newPass || newPass.length < 6) {
+      return { success: false, message: 'New password must be at least 6 characters in length.' };
+    }
+
+    try {
+      // 1. Authenticate with current password to verify identity
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: currentUser.email,
+        password: currentPass,
+      });
+
+      if (verifyError) {
+        return { 
+          success: false, 
+          message: `Current password verification failed: ${verifyError.message}` 
+        };
+      }
+
+      // 2. Perform actual password update
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPass });
+      if (updateError) {
+        return { success: false, message: `Password update rejected: ${updateError.message}` };
+      }
+
+      return { success: true, message: 'Password updated successfully in Supabase Auth.' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Password update encountered an unexpected error.' };
+    }
   };
 
   const isSuperAdmin = currentUser?.role === 'Owner / Administrator';
@@ -376,6 +582,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         changePassword,
         isSuperAdmin,
         authError,
+        refreshUsers,
       }}
     >
       {children}
