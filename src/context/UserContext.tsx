@@ -334,14 +334,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPreferences(prev => ({ ...prev, ...updates }));
   };
 
-  // Requirement 1 & 2: Replace profile-only invitations with secure workflow using trusted server-side function
   const inviteUser = async (data: Omit<UserProfile, 'id' | 'createdAt'>): Promise<{ success: boolean; message: string }> => {
     if (!currentUser || !supabase) return { success: false, message: 'Not authenticated.' };
     if (currentUser.role !== 'Owner / Administrator') {
       return { success: false, message: 'Permission denied: Only Owner / Administrator can invite users.' };
     }
 
-    // Call server-side function admin_invite_user with full server enforcement
     const { data: inviteResult, error: rpcError } = await supabase.rpc('admin_invite_user', {
       p_email: data.email.trim().toLowerCase(),
       p_name: data.name.trim(),
@@ -356,6 +354,27 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: `Invitation failed: ${rpcError.message}` };
     }
 
+    // Securely trigger email invitation
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/api/invite-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ email: data.email, name: data.name, role: data.role })
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to send invitation email:', await response.text());
+        return { success: true, message: `Invitation recorded, but email delivery failed.` };
+      }
+    } catch (err) {
+      console.error('Email invitation error:', err);
+      return { success: true, message: `Invitation recorded, but email delivery failed.` };
+    }
+
     // Refresh users from database
     if (currentCompanyId) {
       await fetchCompanyUsers(currentCompanyId);
@@ -363,7 +382,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return { 
       success: true, 
-      message: `Invitation successfully recorded for ${data.email} (${data.role}).` 
+      message: `Invitation successfully sent to ${data.email} (${data.role}).` 
     };
   };
 
@@ -462,15 +481,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     if (rpcError) {
-      // Fallback to direct delete (which is guarded by database RLS)
-      const { error: deleteError } = await supabase
-        .from('user_profiles')
-        .delete()
-        .eq('id', id);
-
-      if (deleteError) {
-        return { success: false, message: `Failed to remove user: ${rpcError.message || deleteError.message}` };
-      }
+      return { success: false, message: `Failed to remove user: ${rpcError.message}` };
     }
 
     // Refresh users from database
