@@ -138,6 +138,7 @@ DECLARE
   v_user_email TEXT;
   v_invitation RECORD;
   v_profile_id UUID;
+  v_count INTEGER;
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Authentication required.';
@@ -155,14 +156,20 @@ BEGIN
   END IF;
 
   -- Find pending invitation
+  SELECT count(*) INTO v_count
+  FROM public.user_invitations 
+  WHERE lower(email) = v_user_email AND status = 'pending';
+
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'No pending invitation found for email %.', v_user_email;
+  ELSIF v_count > 1 THEN
+    RAISE EXCEPTION 'Multiple pending invitations found for email %. Please contact your company administrator.', v_user_email;
+  END IF;
+
   SELECT * INTO v_invitation 
   FROM public.user_invitations 
-  WHERE lower(email) = v_user_email AND status = 'pending'
-  ORDER BY created_at DESC LIMIT 1;
+  WHERE lower(email) = v_user_email AND status = 'pending';
 
-  IF v_invitation.id IS NULL THEN
-    RAISE EXCEPTION 'No pending invitation found for email %. Please contact your company administrator.', v_user_email;
-  END IF;
 
   -- Create user profile linked to invitation company and role
   INSERT INTO public.user_profiles (
