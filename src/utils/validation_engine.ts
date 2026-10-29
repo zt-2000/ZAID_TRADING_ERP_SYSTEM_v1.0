@@ -1,5 +1,5 @@
 // Extracted from src/services/supabaseSync.ts
-// Contains only pure validation logic, no DB/Auth dependencies.
+// Contains pure validation logic and shared interfaces, no DB/Auth dependencies.
 
 export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -250,6 +250,12 @@ export const TABLE_SCHEMAS: Record<AllowedImportTable, TableColumnSchema> = {
     },
 };
 
+export interface SyncStatus {
+  isConfigured: boolean;
+  connected: boolean;
+  message: string;
+}
+
 export interface ValidationDetail {
   row: number;
   field?: string;
@@ -267,6 +273,30 @@ export interface ImportPreviewResult {
   validationDetails: ValidationDetail[];
   previewData: any[];
   validatedRows: any[];
+}
+
+export interface ExecuteImportOptions {
+  confirmed: boolean;
+  allowOverwriteConflicts?: boolean;
+}
+
+export interface ExecuteImportResult {
+  success: boolean;
+  count: number;
+  tableName: string;
+  error?: string;
+  duplicateCount?: number;
+  conflictingCount?: number;
+}
+
+export interface MigrationReport {
+  success: boolean;
+  totalTablesAttempted: number;
+  tablesSucceeded: number;
+  tablesFailed: number;
+  syncedCounts: Record<string, number>;
+  errors: string[];
+  tableDetails: Record<string, { status: 'success' | 'failed' | 'skipped'; count: number; error?: string }>;
 }
 
 export const validateTableImportData = (

@@ -1,10 +1,103 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { 
+  ALLOWED_IMPORT_TABLES, 
+  BLOCKED_TABLES, 
+  TABLE_SCHEMAS, 
+  TABLE_WRITE_ROLE_PERMISSIONS, 
+  validateTableImportData,
+  AllowedImportTable,
+  BlockedTable
+} from '../utils/validation_engine';
+
+export type {
+  SyncStatus,
+  ValidationDetail,
+  ImportPreviewResult,
+  ExecuteImportOptions,
+  ExecuteImportResult,
+  MigrationReport
+} from '../utils/validation_engine';
 
 // =========================================================================
-// TABLE ALLOWLISTS & PERMISSION POLICIES
+// AUTH & CONTEXT VERIFICATION HELPERS
 // =========================================================================
 
-import { ALLOWED_IMPORT_TABLES, BLOCKED_TABLES, TABLE_SCHEMAS, TABLE_WRITE_ROLE_PERMISSIONS, validateTableImportData } from '../utils/validation_engine';
+import { 
+  SyncStatus, 
+  ImportPreviewResult, 
+  ExecuteImportOptions, 
+  ExecuteImportResult, 
+  MigrationReport 
+} from '../utils/validation_engine';
+
+export const getVerifiedCompanyContext = async (): Promise<{
+  success: boolean;
+  companyId?: string;
+  userRole?: string;
+  userId?: string;
+  error?: string;
+}> => {
+  if (!supabase) {
+    return { success: false, error: 'Supabase client is not initialized.' };
+  }
+
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !session?.user) {
+    return { success: false, error: 'User is not authenticated. Active session required.' };
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('user_profiles')
+    .select('id, company_id, role, status')
+    .eq('user_id', session.user.id)
+    .single();
+
+  if (profileError || !profile) {
+    return { success: false, error: 'No verified ERP user profile found for authenticated session.' };
+  }
+
+  if (profile.status !== 'active') {
+    return { success: false, error: 'User account is inactive or suspended.' };
+  }
+
+  if (!profile.company_id) {
+    return { success: false, error: 'Active tenant company context missing from profile.' };
+  }
+
+  return {
+    success: true,
+    companyId: profile.company_id,
+    userRole: profile.role,
+    userId: session.user.id,
+  };
+};
+
+export const checkSupabaseConnection = async (): Promise<SyncStatus> => {
+  if (!isSupabaseConfigured() || !supabase) {
+    return {
+      isConfigured: false,
+      connected: false,
+      message: 'Supabase environment parameters missing (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY). Local browser storage mode active.',
+    };
+  }
+
+  try {
+    const { error } = await supabase.auth.getSession();
+    if (error) throw error;
+
+    return {
+      isConfigured: true,
+      connected: true,
+      message: 'Connected to Supabase PostgreSQL database with active Row-Level Security.',
+    };
+  } catch (err: any) {
+    return {
+      isConfigured: true,
+      connected: false,
+      message: `Connection test failed: ${err?.message || 'Unknown network error'}`,
+    };
+  }
+};
 
 // =========================================================================
 // PREVIEW AND VALIDATE IMPORT (With DB Conflict Detection)
