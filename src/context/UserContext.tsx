@@ -340,7 +340,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Permission denied: Only Owner / Administrator can invite users.' };
     }
 
-    const { data: inviteResult, error: rpcError } = await supabase.rpc('admin_invite_user', {
+    // 1. Authoritatively record the pending invitation in PostgreSQL
+    const { error: rpcError } = await supabase.rpc('admin_invite_user', {
       p_email: data.email.trim().toLowerCase(),
       p_name: data.name.trim(),
       p_role: data.role,
@@ -354,7 +355,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: `Invitation failed: ${rpcError.message}` };
     }
 
-    // Securely trigger email invitation
+    // 2. Trigger secure server-side email invitation
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch('/api/invite-user', {
@@ -366,13 +367,32 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ email: data.email, name: data.name, role: data.role })
       });
       
+      const resJson = await response.json().catch(() => null);
+
       if (!response.ok) {
-        console.error('Failed to send invitation email:', await response.text());
-        return { success: true, message: `Invitation recorded, but email delivery failed.` };
+        if (response.status === 503) {
+          if (currentCompanyId) await fetchCompanyUsers(currentCompanyId);
+          return { 
+            success: true, 
+            message: `Invitation recorded for ${data.email}. Automated email dispatch is disabled (backend email service not configured).` 
+          };
+        }
+        
+        const errorMsg = resJson?.error || `HTTP ${response.status}: ${response.statusText}`;
+        console.error('Failed to dispatch invitation email:', errorMsg);
+        if (currentCompanyId) await fetchCompanyUsers(currentCompanyId);
+        return { 
+          success: true, 
+          message: `Invitation recorded in database, but email delivery failed: ${errorMsg}. You can retry sending from invitations.` 
+        };
       }
-    } catch (err) {
-      console.error('Email invitation error:', err);
-      return { success: true, message: `Invitation recorded, but email delivery failed.` };
+    } catch (err: any) {
+      console.error('Email invitation network error:', err);
+      if (currentCompanyId) await fetchCompanyUsers(currentCompanyId);
+      return { 
+        success: true, 
+        message: `Invitation recorded in database, but network error prevented email dispatch (${err.message || 'unknown'}).` 
+      };
     }
 
     // Refresh users from database
@@ -475,7 +495,32 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Administrators cannot delete their own account.' };
     }
 
-    // Call server-side function admin_delete_user with guardrails
+    // Try calling backend admin endpoint to delete both profile and Auth credentials
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ profileId: id })
+      });
+
+      if (response.ok) {
+        if (currentCompanyId) {
+          await fetchCompanyUsers(currentCompanyId);
+        }
+        return { success: true, message: 'User account and credentials permanently removed.' };
+      } else if (response.status !== 503) {
+        const errData = await response.json().catch(() => null);
+        return { success: false, message: `Failed to remove user: ${errData?.error || response.statusText}` };
+      }
+    } catch {
+      // Proceed with database RPC fallback if server route not reachable
+    }
+
+    // Call server-side function admin_delete_user with guardrails (fail-closed)
     const { error: rpcError } = await supabase.rpc('admin_delete_user', {
       p_profile_id: id,
     });
@@ -489,7 +534,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await fetchCompanyUsers(currentCompanyId);
     }
 
-    return { success: true, message: 'User account removed successfully.' };
+    return { success: true, message: 'User account removed successfully from company.' };
   };
 
   // Requirement 5: Do not represent local UI filtering as real session revocation
