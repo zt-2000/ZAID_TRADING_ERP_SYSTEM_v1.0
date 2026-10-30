@@ -6,11 +6,10 @@ import {
   Layers,
   Users,
   Building2,
-  Truck,
+  CreditCard,
   Landmark,
   Receipt,
   BarChart3,
-  ShieldCheck,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -70,7 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'inventory', label: 'Inventory', icon: Layers },
         { id: 'customers', label: 'Customers', icon: Users },
         { id: 'suppliers', label: 'Suppliers', icon: Building2 },
-        { id: 'delivery', label: 'Delivery', icon: Truck },
+        { id: 'supplier_payments', label: 'Supplier Payments', icon: CreditCard },
       ],
     },
     {
@@ -84,7 +83,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       groupTitle: 'ADMINISTRATION',
       items: [
-        { id: 'users', label: 'Users & Permissions', icon: ShieldCheck },
         { id: 'settings', label: 'Settings', icon: Settings },
       ],
     },

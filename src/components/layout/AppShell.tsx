@@ -24,12 +24,13 @@ import { PurchasingPage } from '../../pages/PurchasingPage';
 import { InventoryPage } from '../../pages/InventoryPage';
 import { CustomersPage } from '../../pages/CustomersPage';
 import { SuppliersPage } from '../../pages/SuppliersPage';
-import { DeliveryPage } from '../../pages/DeliveryPage';
+import { SupplierPaymentsPage } from '../../pages/SupplierPaymentsPage';
 import { FinancePage } from '../../pages/FinancePage';
 import { ExpensesPage } from '../../pages/ExpensesPage';
 import { ReportsPage } from '../../pages/ReportsPage';
-import { UsersPermissionsPage } from '../../pages/UsersPermissionsPage';
 import { SettingsPage } from '../../pages/SettingsPage';
+import { AuthLoginView } from '../auth/AuthLoginView';
+import { isSupabaseConfigured } from '../../lib/supabase';
 
 interface AppShellProps {
   companySettings: CompanySettings;
@@ -40,7 +41,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   companySettings,
   onUpdateSettings,
 }) => {
-  const { currentUser, updateUser } = useUser();
+  const { currentUser, loading } = useUser();
   const [currentSection, setCurrentSection] = useState<NavigationSection>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -77,6 +78,10 @@ export const AppShell: React.FC<AppShellProps> = ({
   }, []);
 
   const handleOpenQuickAction = (action: string) => {
+    if (action === 'supplier_payment') {
+      setCurrentSection('supplier_payments');
+      return;
+    }
     setActiveQuickAction(action);
   };
 
@@ -125,10 +130,10 @@ export const AppShell: React.FC<AppShellProps> = ({
             currencySymbol={companySettings.currencySymbol}
           />
         );
-      case 'delivery':
+      case 'supplier_payments':
         return (
-          <DeliveryPage
-            companySettings={companySettings}
+          <SupplierPaymentsPage
+            currencySymbol={companySettings.currencySymbol}
           />
         );
       case 'finance':
@@ -150,8 +155,6 @@ export const AppShell: React.FC<AppShellProps> = ({
             currencySymbol={companySettings.currencySymbol}
           />
         );
-      case 'users':
-        return <UsersPermissionsPage />;
       case 'settings':
         return (
           <SettingsPage
@@ -169,6 +172,24 @@ export const AppShell: React.FC<AppShellProps> = ({
         );
     }
   };
+
+  // If Supabase authentication is active and user is not signed in, show secure login workstation
+  if (isSupabaseConfigured() && !currentUser && !loading) {
+    return <AuthLoginView companySettings={companySettings} />;
+  }
+
+  if (loading) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#FAFBF9] dark:bg-[#0f1311]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-3 border-[#167a53] border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs font-semibold text-slate-600 dark:text-neutral-400">
+            Initializing Zaid Trading ERP...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#FAFBF9] dark:bg-[#0f1311] text-[#1E2922] dark:text-[#E2E8E4]">

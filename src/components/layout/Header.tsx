@@ -42,11 +42,10 @@ const sectionLabels: Record<NavigationSection, string> = {
   inventory: 'Inventory',
   customers: 'Customers',
   suppliers: 'Suppliers',
-  delivery: 'Delivery & Van Sales',
+  supplier_payments: 'Supplier Payments',
   finance: 'Finance',
   expenses: 'Expenses',
   reports: 'Reports',
-  users: 'Users & Permissions',
   settings: 'Settings',
 };
 

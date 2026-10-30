@@ -32,7 +32,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({
   currencySymbol = 'Rs.',
 }) => {
   const { showToast } = useToast();
-  const { purchases, grns, supplierReturns, debitNotes } = useTransactions();
+  const { purchases, grns, supplierReturns, debitNotes, bills } = useTransactions();
 
   const [activeTab, setActiveTab] = useState<'po' | 'grn' | 'bills' | 'returns'>('po');
   const [searchQuery, setSearchQuery] = useState('');
@@ -417,6 +417,51 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({
                 Zero Discrepancies
               </p>
               <p className="text-xs text-slate-500 mt-1">Matched invoices are posted to Trade Accounts Payable (2010).</p>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-slate-100 dark:border-neutral-800">
+            <h4 className="text-xs font-bold text-slate-900 dark:text-neutral-100 uppercase tracking-wider mb-3">
+              Matched Purchase Bills in Accounts Payable ({bills.length})
+            </h4>
+            <div className="border border-slate-200 dark:border-neutral-800 rounded-xl overflow-hidden">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-50 dark:bg-[#151b18] border-b border-slate-200 dark:border-neutral-800 text-[11px] font-semibold text-slate-600 dark:text-neutral-400">
+                  <tr>
+                    <th className="p-3">BILL #</th>
+                    <th className="p-3">SUPPLIER</th>
+                    <th className="p-3">DATE</th>
+                    <th className="p-3 text-right">ORIGINAL BILL</th>
+                    <th className="p-3 text-right">PAID AMOUNT</th>
+                    <th className="p-3 text-right">REMAINING BALANCE</th>
+                    <th className="p-3 text-center">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-neutral-800">
+                  {bills.map((b) => (
+                    <tr key={b.id} className="hover:bg-slate-50/50 dark:hover:bg-[#1a211e]">
+                      <td className="p-3 font-mono font-bold text-[#167a53] dark:text-[#34d399]">{b.billNumber}</td>
+                      <td className="p-3 font-semibold text-slate-800 dark:text-neutral-200">{b.supplierName}</td>
+                      <td className="p-3 text-slate-500">{formatDateOnly(b.date)}</td>
+                      <td className="p-3 text-right font-mono text-slate-700 dark:text-neutral-300">{formatCurrency(b.originalAmount, currencySymbol)}</td>
+                      <td className="p-3 text-right font-mono text-emerald-700 dark:text-emerald-400">{formatCurrency(b.paidAmount, currencySymbol)}</td>
+                      <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-neutral-100">{formatCurrency(b.remainingBalance, currencySymbol)}</td>
+                      <td className="p-3 text-center">
+                        <Badge variant={b.status === 'paid' ? 'success' : b.status === 'partial' ? 'warning' : 'danger'} dot>
+                          {b.status.toUpperCase()}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                  {bills.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="p-6 text-center text-slate-400">
+                        No purchase bills recorded yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

@@ -31,8 +31,8 @@ export const PrintableInvoiceModal: React.FC<PrintableInvoiceModalProps> = ({
     <Dialog
       isOpen={isOpen}
       onClose={onClose}
-      title={`Commercial Invoice — ${invoice.invoiceNumber}`}
-      description="Tax-compliant commercial wholesale invoice"
+      title={`Sales Invoice — ${invoice.invoiceNumber}`}
+      description="Tax-compliant wholesale sales invoice"
       maxWidth="3xl"
       footer={
         <div className="flex items-center justify-between w-full">

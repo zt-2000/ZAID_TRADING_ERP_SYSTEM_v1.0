@@ -90,7 +90,18 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loadSessionAndProfile = useCallback(async () => {
     if (!isSupabaseConfigured() || !supabase) {
       setLoading(false);
-      setAuthError('Supabase is not configured. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in environment variables.');
+      setCurrentUser({
+        id: 'usr_zaid_admin',
+        name: 'Zaid Al-Hassan',
+        displayName: 'Zaid',
+        email: 'zaidtrading.info@gmail.com',
+        phone: '+94 11 234 5678',
+        jobTitle: 'Sole Proprietor & Managing Director',
+        role: 'Owner / Administrator',
+        status: 'active',
+        createdAt: '2026-10-01',
+      });
+      setAuthError(null);
       return;
     }
 

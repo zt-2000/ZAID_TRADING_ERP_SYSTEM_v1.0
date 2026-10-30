@@ -435,7 +435,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             Sales & Invoicing
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-neutral-400 mt-0.5">
-            Commercial wholesale invoices, quotations, sales orders, returns, and credit notes
+            Sales invoices, quotations, sales orders, customer returns, and credit notes
           </p>
         </div>
 
@@ -498,7 +498,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-neutral-800 space-x-6 text-xs font-semibold overflow-x-auto pb-px">
         {[
-          { id: 'invoices', label: `Commercial Invoices (${sales.length})` },
+          { id: 'invoices', label: `Sales Invoices (${sales.length})` },
           { id: 'quotations', label: `Quotations / Proformas (${quotations.length})` },
           { id: 'orders', label: `Sales Orders (${salesOrders.length})` },
           { id: 'returns', label: `Returns & Credit Notes (${salesReturns.length})` },
@@ -581,7 +581,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         )}
       </div>
 
-      {/* Tab 1: Commercial Invoices */}
+      {/* Tab 1: Sales Invoices */}
       {activeTab === 'invoices' && (
         <Table
           columns={invoiceColumns}
@@ -593,7 +593,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 <ShoppingBag className="w-6 h-6" />
               </div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-neutral-100">
-                No commercial invoices posted yet
+                No sales invoices posted yet
               </h3>
               <p className="text-xs text-slate-500 dark:text-neutral-400 max-w-sm mt-1 leading-relaxed">
                 When sales invoices are posted, customer receivables, double-entry GL postings, and printable documents are managed here.

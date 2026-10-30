@@ -22,9 +22,13 @@ import {
   DeliveryStatus,
   DeliveryLineItem,
   DeliveryHistoryLog,
+  PurchaseBillRecord,
+  SupplierPaymentRecord,
 } from '../types';
 
 export type {
+  PurchaseBillRecord,
+  SupplierPaymentRecord,
   QuotationRecord,
   QuotationLineItem,
   SalesOrderRecord,
@@ -261,6 +265,8 @@ interface TransactionContextType {
   expenses: ExpenseRecord[];
   sales: SaleRecord[];
   purchases: PurchaseRecord[];
+  bills: PurchaseBillRecord[];
+  supplierPayments: SupplierPaymentRecord[];
   customers: CustomerRecord[];
   suppliers: SupplierRecord[];
   glEntries: GeneralLedgerEntry[];
@@ -276,6 +282,35 @@ interface TransactionContextType {
   warehouseBins: WarehouseBinRecord[];
   shipments: DeliveryShipmentRecord[];
   deliveries: DeliveryRecord[];
+
+  // Supplier Payments & Bills Management
+  recordSupplierPayment: (data: {
+    supplierId: string;
+    supplierName: string;
+    supplierCode?: string;
+    billId?: string;
+    billNumber?: string;
+    paymentDate: string;
+    amount: number;
+    paymentMethod: 'bank_transfer' | 'cash' | 'cheque' | 'online_transfer';
+    accountCode: string;
+    accountName: string;
+    referenceNumber: string;
+    notes?: string;
+    allowOverpaymentOverride?: boolean;
+    overrideReason?: string;
+  }) => { success: boolean; payment?: SupplierPaymentRecord; error?: string };
+
+  createPurchaseBill: (data: {
+    supplierId: string;
+    supplierName: string;
+    supplierCode?: string;
+    poNumber?: string;
+    date: string;
+    dueDate: string;
+    originalAmount: number;
+    notes?: string;
+  }) => { success: boolean; bill?: PurchaseBillRecord; error?: string };
 
   // Delivery Management
   createDeliveryFromSalesOrder: (data: {
@@ -502,6 +537,99 @@ interface TransactionContextType {
   ) => { success: boolean };
 }
 
+export const defaultSuppliers: SupplierRecord[] = [
+  {
+    id: 'supp_001',
+    code: 'VND-RICE-01',
+    name: 'Polonnaruwa Agri Rice Mills (Pvt) Ltd',
+    phone: '+94 27 222 3456',
+    email: 'accounts@polonnaruwaricemills.lk',
+    address: 'Mill Road, New Town, Polonnaruwa',
+    taxNumber: '109923847-7000',
+    paymentTerms: '30_days',
+    balance: 485000,
+    status: 'active',
+    createdAt: '2026-10-01',
+  },
+  {
+    id: 'supp_002',
+    code: 'VND-OIL-02',
+    name: 'Lanka Edible Oils & Fats Refineries Ltd',
+    phone: '+94 11 456 7890',
+    email: 'billing@lankaoils.lk',
+    address: 'Sedawatta Road, Wellampitiya, Colombo',
+    taxNumber: '108849201-7000',
+    paymentTerms: '15_days',
+    balance: 720000,
+    status: 'active',
+    createdAt: '2026-10-05',
+  },
+  {
+    id: 'supp_003',
+    code: 'VND-SPICE-03',
+    name: 'Ceylon Spice & Agro Commodities Export Corp',
+    phone: '+94 81 223 9081',
+    email: 'finance@ceylonspicecorp.com',
+    address: 'Peradeniya Road, Kandy',
+    taxNumber: '107738291-7000',
+    paymentTerms: 'immediate',
+    balance: 195000,
+    status: 'active',
+    createdAt: '2026-10-10',
+  },
+];
+
+export const defaultSupplierBills: PurchaseBillRecord[] = [
+  {
+    id: 'bill_1001',
+    billNumber: 'BILL-2026-089',
+    supplierId: 'supp_001',
+    supplierName: 'Polonnaruwa Agri Rice Mills (Pvt) Ltd',
+    supplierCode: 'VND-RICE-01',
+    poNumber: 'PO-0501',
+    date: '2026-10-12',
+    dueDate: '2026-11-12',
+    originalAmount: 485000,
+    paidAmount: 0,
+    remainingBalance: 485000,
+    status: 'unpaid',
+    notes: 'Bulk Samba & Keeri Samba 50kg Bags procurement',
+    createdAt: '2026-10-12',
+  },
+  {
+    id: 'bill_1002',
+    billNumber: 'BILL-2026-094',
+    supplierId: 'supp_002',
+    supplierName: 'Lanka Edible Oils & Fats Refineries Ltd',
+    supplierCode: 'VND-OIL-02',
+    poNumber: 'PO-0502',
+    date: '2026-10-15',
+    dueDate: '2026-10-30',
+    originalAmount: 720000,
+    paidAmount: 0,
+    remainingBalance: 720000,
+    status: 'unpaid',
+    notes: 'Wholesale Pure Vegetable Cooking Oil Drums (200L)',
+    createdAt: '2026-10-15',
+  },
+  {
+    id: 'bill_1003',
+    billNumber: 'BILL-2026-101',
+    supplierId: 'supp_003',
+    supplierName: 'Ceylon Spice & Agro Commodities Export Corp',
+    supplierCode: 'VND-SPICE-03',
+    poNumber: 'PO-0503',
+    date: '2026-10-20',
+    dueDate: '2026-10-20',
+    originalAmount: 195000,
+    paidAmount: 0,
+    remainingBalance: 195000,
+    status: 'unpaid',
+    notes: 'Premium Grade Bulk Ceylon Cinnamon & Black Pepper',
+    createdAt: '2026-10-20',
+  },
+];
+
 const TransactionContext = createContext<TransactionContextType | undefined>(undefined);
 
 export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -530,6 +658,32 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>(() => {
     const saved = localStorage.getItem('zaid_erp_suppliers');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {
+        // fallback
+      }
+    }
+    return defaultSuppliers;
+  });
+
+  const [bills, setBills] = useState<PurchaseBillRecord[]>(() => {
+    const saved = localStorage.getItem('zaid_erp_supplier_bills');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {
+        // fallback
+      }
+    }
+    return defaultSupplierBills;
+  });
+
+  const [supplierPayments, setSupplierPayments] = useState<SupplierPaymentRecord[]>(() => {
+    const saved = localStorage.getItem('zaid_erp_supplier_payments');
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -648,6 +802,14 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
   useEffect(() => {
     localStorage.setItem('zaid_erp_suppliers', JSON.stringify(suppliers));
   }, [suppliers]);
+
+  useEffect(() => {
+    localStorage.setItem('zaid_erp_supplier_bills', JSON.stringify(bills));
+  }, [bills]);
+
+  useEffect(() => {
+    localStorage.setItem('zaid_erp_supplier_payments', JSON.stringify(supplierPayments));
+  }, [supplierPayments]);
 
   useEffect(() => {
     localStorage.setItem('zaid_erp_gl_transactions', JSON.stringify(glEntries));
@@ -917,6 +1079,227 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       return { success: true, record: newPurchase };
     },
     [purchases]
+  );
+
+  // Record Supplier Payment
+  const recordSupplierPayment = useCallback(
+    (data: {
+      supplierId: string;
+      supplierName: string;
+      supplierCode?: string;
+      billId?: string;
+      billNumber?: string;
+      paymentDate: string;
+      amount: number;
+      paymentMethod: 'bank_transfer' | 'cash' | 'cheque' | 'online_transfer';
+      accountCode: string;
+      accountName: string;
+      referenceNumber: string;
+      notes?: string;
+      allowOverpaymentOverride?: boolean;
+      overrideReason?: string;
+    }) => {
+      if (data.amount <= 0) {
+        return { success: false, error: 'Payment amount must be strictly greater than zero.' };
+      }
+      if (!data.referenceNumber?.trim()) {
+        return { success: false, error: 'Payment reference number (Cheque #, Bank Ref, or Deposit Slip #) is required for audit verification.' };
+      }
+
+      // Prevent duplicate payments (same supplier, same reference, same amount)
+      const isDuplicate = supplierPayments.some(
+        (p) =>
+          p.status === 'posted' &&
+          p.supplierId === data.supplierId &&
+          p.referenceNumber.trim().toLowerCase() === data.referenceNumber.trim().toLowerCase() &&
+          Math.abs(p.amount - data.amount) < 0.01
+      );
+      if (isDuplicate) {
+        return {
+          success: false,
+          error: `Duplicate payment detected: A posted voucher with reference "${data.referenceNumber.trim()}" and amount Rs. ${data.amount.toLocaleString()} already exists for this supplier.`
+        };
+      }
+
+      // Validate against target bill if specified
+      let targetBill: PurchaseBillRecord | undefined;
+      if (data.billId) {
+        targetBill = bills.find((b) => b.id === data.billId);
+        if (targetBill) {
+          if (data.amount > targetBill.remainingBalance && !data.allowOverpaymentOverride) {
+            return {
+              success: false,
+              error: `Payment amount (Rs. ${data.amount.toLocaleString()}) exceeds outstanding bill balance (Rs. ${targetBill.remainingBalance.toLocaleString()}). Check 'Authorized Adjustment' to permit overpayment.`
+            };
+          }
+        }
+      }
+
+      // Generate Voucher Number: PV-1001, PV-1002, etc.
+      const voucherNo = `PV-${String(supplierPayments.length + 1001).padStart(4, '0')}`;
+      const today = data.paymentDate || new Date().toISOString().split('T')[0];
+
+      const newPayment: SupplierPaymentRecord = {
+        id: `spay_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        voucherNumber: voucherNo,
+        supplierId: data.supplierId,
+        supplierName: data.supplierName,
+        supplierCode: data.supplierCode,
+        billId: data.billId,
+        billNumber: data.billNumber || targetBill?.billNumber,
+        paymentDate: today,
+        amount: data.amount,
+        paymentMethod: data.paymentMethod,
+        accountCode: data.accountCode,
+        accountName: data.accountName,
+        referenceNumber: data.referenceNumber.trim(),
+        notes: data.notes || '',
+        recordedBy: 'Owner / Administrator',
+        status: 'posted',
+        createdAt: new Date().toISOString(),
+      };
+
+      // Update Bill balance and status
+      if (targetBill) {
+        setBills((prev) =>
+          prev.map((b) => {
+            if (b.id !== targetBill!.id) return b;
+            const newPaid = b.paidAmount + data.amount;
+            const newRemaining = Math.max(0, b.originalAmount - newPaid);
+            const newStatus: 'unpaid' | 'partial' | 'paid' =
+              newRemaining <= 0 ? 'paid' : newPaid > 0 ? 'partial' : 'unpaid';
+            return {
+              ...b,
+              paidAmount: newPaid,
+              remainingBalance: newRemaining,
+              status: newStatus,
+            };
+          })
+        );
+      }
+
+      // Automatically update supplier outstanding balance
+      setSuppliers((prev) =>
+        prev.map((s) => {
+          if (s.id !== data.supplierId) return s;
+          const newBalance = Math.max(0, s.balance - data.amount);
+          return {
+            ...s,
+            balance: newBalance,
+          };
+        })
+      );
+
+      // Post General Ledger double-entry transaction
+      // Debit: Trade Accounts Payable (2010)
+      // Credit: Selected Cash / Bank Account (e.g. 1020 Operating Bank or 1010 Petty Cash)
+      const memo = `Supplier payment to ${data.supplierName} ${data.billNumber ? `for ${data.billNumber}` : ''} [Ref: ${data.referenceNumber.trim()}]`;
+
+      const glDebit: GeneralLedgerEntry = {
+        id: `gl_${Date.now()}_pv_dr`,
+        date: today,
+        voucherRef: voucherNo,
+        accountCode: '2010',
+        accountName: 'Trade Accounts Payable',
+        memo,
+        debit: data.amount,
+        credit: 0,
+        runningBalance: 0,
+        status: 'posted',
+      };
+
+      const glCredit: GeneralLedgerEntry = {
+        id: `gl_${Date.now()}_pv_cr`,
+        date: today,
+        voucherRef: voucherNo,
+        accountCode: data.accountCode,
+        accountName: data.accountName,
+        memo,
+        debit: 0,
+        credit: data.amount,
+        runningBalance: 0,
+        status: 'posted',
+      };
+
+      setGlEntries((prev) => [glDebit, glCredit, ...prev]);
+      setSupplierPayments((prev) => [newPayment, ...prev]);
+
+      return { success: true, payment: newPayment };
+    },
+    [bills, suppliers, supplierPayments]
+  );
+
+  // Create Purchase Bill
+  const createPurchaseBill = useCallback(
+    (data: {
+      supplierId: string;
+      supplierName: string;
+      supplierCode?: string;
+      poNumber?: string;
+      date: string;
+      dueDate: string;
+      originalAmount: number;
+      notes?: string;
+    }) => {
+      const billNo = `BILL-${new Date().getFullYear()}-${String(bills.length + 101).padStart(3, '0')}`;
+      const newBill: PurchaseBillRecord = {
+        id: `bill_${Date.now()}`,
+        billNumber: billNo,
+        supplierId: data.supplierId,
+        supplierName: data.supplierName,
+        supplierCode: data.supplierCode,
+        poNumber: data.poNumber,
+        date: data.date,
+        dueDate: data.dueDate,
+        originalAmount: data.originalAmount,
+        paidAmount: 0,
+        remainingBalance: data.originalAmount,
+        status: 'unpaid',
+        notes: data.notes,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Increment supplier payable balance
+      setSuppliers((prev) =>
+        prev.map((s) => {
+          if (s.id !== data.supplierId) return s;
+          return { ...s, balance: s.balance + data.originalAmount };
+        })
+      );
+
+      // Post GL Entry: DR Merchandise Inventory Asset (1100), CR Trade Accounts Payable (2010)
+      const glDebit: GeneralLedgerEntry = {
+        id: `gl_${Date.now()}_bill_dr`,
+        date: data.date,
+        voucherRef: billNo,
+        accountCode: '1100',
+        accountName: 'Merchandise Inventory Asset',
+        memo: `Purchase bill from ${data.supplierName} (${billNo})`,
+        debit: data.originalAmount,
+        credit: 0,
+        runningBalance: 0,
+        status: 'posted',
+      };
+
+      const glCredit: GeneralLedgerEntry = {
+        id: `gl_${Date.now()}_bill_cr`,
+        date: data.date,
+        voucherRef: billNo,
+        accountCode: '2010',
+        accountName: 'Trade Accounts Payable',
+        memo: `Purchase bill from ${data.supplierName} (${billNo})`,
+        debit: 0,
+        credit: data.originalAmount,
+        runningBalance: 0,
+        status: 'posted',
+      };
+
+      setGlEntries((prev) => [glDebit, glCredit, ...prev]);
+      setBills((prev) => [newBill, ...prev]);
+
+      return { success: true, bill: newBill };
+    },
+    [bills]
   );
 
   // Add Customer
@@ -1858,6 +2241,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         expenses,
         sales,
         purchases,
+        bills,
+        supplierPayments,
         customers,
         suppliers,
         glEntries,
@@ -1876,6 +2261,8 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         recordExpense,
         recordSale,
         recordPurchase,
+        recordSupplierPayment,
+        createPurchaseBill,
         addCustomer,
         addSupplier,
         recordJournalEntry,

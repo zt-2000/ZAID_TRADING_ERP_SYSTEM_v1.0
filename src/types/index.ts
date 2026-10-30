@@ -7,12 +7,48 @@ export type NavigationSection =
   | 'inventory'
   | 'customers'
   | 'suppliers'
-  | 'delivery'
+  | 'supplier_payments'
   | 'finance'
   | 'expenses'
   | 'reports'
-  | 'users'
   | 'settings';
+
+export interface PurchaseBillRecord {
+  id: string;
+  billNumber: string;
+  supplierId: string;
+  supplierName: string;
+  supplierCode?: string;
+  poNumber?: string;
+  date: string;
+  dueDate: string;
+  originalAmount: number;
+  paidAmount: number;
+  remainingBalance: number;
+  status: 'unpaid' | 'partial' | 'paid';
+  notes?: string;
+  createdAt: string;
+}
+
+export interface SupplierPaymentRecord {
+  id: string;
+  voucherNumber: string;
+  supplierId: string;
+  supplierName: string;
+  supplierCode?: string;
+  billId?: string;
+  billNumber?: string;
+  paymentDate: string;
+  amount: number;
+  paymentMethod: 'bank_transfer' | 'cash' | 'cheque' | 'online_transfer';
+  accountCode: string;
+  accountName: string;
+  referenceNumber: string;
+  notes?: string;
+  recordedBy: string;
+  status: 'posted' | 'voided';
+  createdAt: string;
+}
 
 export interface CompanySettings {
   companyName: string;

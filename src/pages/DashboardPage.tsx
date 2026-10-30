@@ -16,6 +16,7 @@ import {
   TrendingUp,
   Filter,
   ChevronRight,
+  CreditCard,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -265,6 +266,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           leftIcon={<Receipt className="w-3.5 h-3.5" />}
         >
           Record Expense
+        </Button>
+
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => onNavigateToModule('supplier_payments')}
+          leftIcon={<CreditCard className="w-3.5 h-3.5" />}
+        >
+          Pay Supplier
         </Button>
       </div>
 

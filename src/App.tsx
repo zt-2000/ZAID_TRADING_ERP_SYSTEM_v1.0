@@ -29,6 +29,7 @@ const defaultSettings: CompanySettings = {
   multicurrencyEnabled: true,
   defaultTaxRate: 15,
   taxInclusivePricing: false,
+  defaultApplyVat: false,
   financialYearStartMonth: 1,
   dateFormat: 'YYYY-MM-DD',
   timeZone: 'Asia/Colombo',

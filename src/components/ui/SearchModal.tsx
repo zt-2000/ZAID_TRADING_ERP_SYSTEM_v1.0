@@ -36,18 +36,18 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     { id: 'purchasing' as NavigationSection, title: 'Purchasing & POs', icon: ShoppingCart, group: 'Navigation' },
     { id: 'inventory' as NavigationSection, title: 'Inventory & Warehouses', icon: Layers, group: 'Navigation' },
     { id: 'customers' as NavigationSection, title: 'Customers & Receivables', icon: Users, group: 'Navigation' },
-    { id: 'suppliers' as NavigationSection, title: 'Suppliers & Payables', icon: Building2, group: 'Navigation' },
-    { id: 'delivery' as NavigationSection, title: 'Delivery & Van Sales', icon: Truck, group: 'Navigation' },
+    { id: 'suppliers' as NavigationSection, title: 'Suppliers & Vendor Directory', icon: Building2, group: 'Navigation' },
+    { id: 'supplier_payments' as NavigationSection, title: 'Supplier Payments & Vouchers', icon: Receipt, group: 'Navigation' },
     { id: 'finance' as NavigationSection, title: 'Finance & General Ledger', icon: Landmark, group: 'Navigation' },
     { id: 'expenses' as NavigationSection, title: 'Expenses & Payments', icon: Receipt, group: 'Navigation' },
     { id: 'reports' as NavigationSection, title: 'Financial & Inventory Reports', icon: BarChart3, group: 'Navigation' },
-    { id: 'users' as NavigationSection, title: 'Users & Permissions', icon: ShieldCheck, group: 'Navigation' },
     { id: 'settings' as NavigationSection, title: 'Company Settings & Currencies', icon: Settings, group: 'Navigation' },
   ];
 
   const quickActions = [
     { id: 'new_sale', title: 'Create New Sale Invoice', subtitle: 'Post sales transaction', action: 'sale' },
     { id: 'new_purchase', title: 'Create Purchase Order', subtitle: 'Order from verified supplier', action: 'purchase' },
+    { id: 'supplier_payment', title: 'Disburse Supplier Payment', subtitle: 'Settle vendor purchase bill', action: 'supplier_payment' },
     { id: 'add_product', title: 'Register New Product', subtitle: 'Add SKU and wholesale price', action: 'product' },
     { id: 'add_customer', title: 'Register New Customer', subtitle: 'Add customer account and credit limits', action: 'customer' },
     { id: 'record_expense', title: 'Record Operating Expense', subtitle: 'Post cash/bank expense voucher', action: 'expense' },

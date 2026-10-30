@@ -8,23 +8,14 @@ interface UserMenuModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserProfile;
-  onUpdateRole: (role: UserProfile['role']) => void;
+  onUpdateRole?: (role: UserProfile['role']) => void;
 }
 
 export const UserMenuModal: React.FC<UserMenuModalProps> = ({
   isOpen,
   onClose,
   currentUser,
-  onUpdateRole,
 }) => {
-  const roles: UserProfile['role'][] = [
-    'Owner / Administrator',
-    'Manager',
-    'Salesperson',
-    'Storekeeper',
-    'Accountant',
-    'Delivery Driver',
-  ];
 
   return (
     <Dialog
@@ -62,27 +53,14 @@ export const UserMenuModal: React.FC<UserMenuModalProps> = ({
           </div>
         </div>
 
-        {/* Role Selector */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 dark:text-neutral-300 mb-1.5">
-            Switch Operator Role Simulation
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            {roles.map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => onUpdateRole(r)}
-                className={`p-2 rounded-lg text-xs text-left border transition-colors cursor-pointer ${
-                  currentUser.role === r
-                    ? 'border-[#167a53] bg-[#167a53]/10 dark:bg-[#167a53]/20 text-[#167a53] dark:text-[#34d399] font-semibold'
-                    : 'border-slate-200 dark:border-neutral-800 hover:bg-slate-50 dark:hover:bg-[#1f2923] text-slate-700 dark:text-neutral-300'
-                }`}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
+        {/* Single Operator Profile Info */}
+        <div className="p-3 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-900/40 text-xs space-y-1">
+          <p className="font-semibold text-emerald-900 dark:text-emerald-300">
+            Single-User Business Operation
+          </p>
+          <p className="text-[11px] text-emerald-800/80 dark:text-emerald-400 leading-relaxed">
+            Authorized Account: Owner / Administrator with full executive access across all ERP wholesale modules.
+          </p>
         </div>
 
         {/* Security & Access Info */}

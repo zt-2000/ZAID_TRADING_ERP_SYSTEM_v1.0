@@ -1,5 +1,21 @@
+import 'dotenv/config';
+import fs from 'fs';
 import express, { Request, Response, NextFunction } from 'express';
 import { createClient } from '@supabase/supabase-js';
+
+// If running in development environment, synchronize missing keys from .dev.env.json if present
+if (fs.existsSync('/app/.dev.env.json')) {
+  try {
+    const devEnv = JSON.parse(fs.readFileSync('/app/.dev.env.json', 'utf8'));
+    for (const [k, v] of Object.entries(devEnv)) {
+      if (!process.env[k] && typeof v === 'string') {
+        process.env[k] = v;
+      }
+    }
+  } catch {
+    // Ignore JSON parse errors in dev env file
+  }
+}
 
 export const app = express();
 app.use(express.json());
@@ -322,17 +338,23 @@ app.post('/api/admin/delete-user', async (req: Request, res: Response) => {
 
 // Vite middleware mounting for development
 import { fileURLToPath } from 'url';
+import http from 'http';
 
 const isDirectRun = Boolean(process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]);
 if (isDirectRun && process.env.NODE_ENV !== 'test') {
+  const server = http.createServer(app);
   const vite = await import('vite');
   const viteServer = await vite.createServer({
-    server: { middlewareMode: true },
+    server: { 
+      middlewareMode: true,
+      hmr: { server }
+    },
     appType: 'spa',
   });
   app.use(viteServer.middlewares);
 
-  app.listen(3000, () => {
+  server.listen(3000, () => {
     console.log('Zaid Trading ERP Server running on http://localhost:3000');
   });
 }
+
