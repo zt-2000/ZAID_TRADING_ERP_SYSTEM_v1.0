@@ -25,6 +25,8 @@ interface UserContextType {
   refreshUsers: () => Promise<void>;
 }
 
+export const AUTHORIZED_OPERATOR_EMAIL = 'zaidtrading.info@gmail.com';
+
 const defaultPreferences: UserPreferences = {
   theme: 'light',
   dateFormat: 'YYYY-MM-DD',
@@ -88,13 +90,21 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const loadSessionAndProfile = useCallback(async () => {
+    // Check production constraint: offline bypass is strictly prohibited in production
+    if (import.meta.env.PROD && (!isSupabaseConfigured() || !supabase)) {
+      setLoading(false);
+      setCurrentUser(null);
+      setAuthError('Supabase Authentication is strictly required in production mode. Local offline fallback is disabled.');
+      return;
+    }
+
     if (!isSupabaseConfigured() || !supabase) {
       setLoading(false);
       setCurrentUser({
         id: 'usr_zaid_admin',
         name: 'Zaid Al-Hassan',
         displayName: 'Zaid',
-        email: 'zaidtrading.info@gmail.com',
+        email: AUTHORIZED_OPERATOR_EMAIL,
         phone: '+94 11 234 5678',
         jobTitle: 'Sole Proprietor & Managing Director',
         role: 'Owner / Administrator',
@@ -110,6 +120,16 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (sessionError) throw sessionError;
 
       if (session?.user) {
+        const userEmail = (session.user.email || '').toLowerCase().trim();
+        // Item 3: Ensure only the authorized Supabase account can access the ERP
+        if (userEmail !== AUTHORIZED_OPERATOR_EMAIL) {
+          await supabase.auth.signOut();
+          setCurrentUser(null);
+          setCurrentCompanyId(null);
+          setAuthError(`Access Denied: Account '${session.user.email}' is not authorized. Only ${AUTHORIZED_OPERATOR_EMAIL} is permitted to access Zaid Trading ERP.`);
+          return;
+        }
+
         // Fetch user profile from database
         let { data: profile, error: profileError } = await supabase
           .from('user_profiles')
@@ -198,8 +218,17 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signIn = async (email: string, pass: string): Promise<{ success: boolean; message: string }> => {
     if (!supabase) return { success: false, message: 'Supabase client not initialized.' };
     setAuthError(null);
+
+    const normalizedEmail = email.toLowerCase().trim();
+    if (normalizedEmail !== AUTHORIZED_OPERATOR_EMAIL) {
+      return {
+        success: false,
+        message: `Access Denied: Account '${email}' is unauthorized. Only ${AUTHORIZED_OPERATOR_EMAIL} is permitted to access Zaid Trading ERP.`,
+      };
+    }
+
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      const { data, error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password: pass });
       if (error) return { success: false, message: error.message };
 
       if (data.user) {

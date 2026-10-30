@@ -21,7 +21,9 @@ export const app = express();
 app.use(express.json());
 
 // Initialize Supabase Admin client
-const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const rawSupabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const matchUrl = rawSupabaseUrl.match(/(https:\/\/[a-z0-9-]+\.supabase\.co)/i);
+const supabaseUrl = matchUrl ? matchUrl[1] : rawSupabaseUrl.trim();
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export let supabaseAdmin: any = null;

@@ -461,12 +461,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   label="Commercial Registration (CR) Number"
                   value={formData.registrationNumber}
                   onChange={(e) => updateField('registrationNumber', e.target.value)}
+                  placeholder="e.g. PV-101088924"
                 />
                 <Input
                   label="VAT / Tax Identification Number (TIN)"
                   value={formData.taxNumber}
                   onChange={(e) => updateField('taxNumber', e.target.value)}
+                  placeholder="e.g. 101088924-7000"
                 />
+              </div>
+
+              <div className="p-3 rounded-lg bg-slate-50 dark:bg-[#151b18] border border-slate-200 dark:border-neutral-800 text-[11px] text-slate-500 dark:text-neutral-400">
+                <strong>Self-Declared Compliance Notice:</strong> Commercial registration number, TIN, hotline, and official address are customizable enterprise parameters and are self-declared (not assumed to be government-verified).
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -537,98 +537,9 @@ interface TransactionContextType {
   ) => { success: boolean };
 }
 
-export const defaultSuppliers: SupplierRecord[] = [
-  {
-    id: 'supp_001',
-    code: 'VND-RICE-01',
-    name: 'Polonnaruwa Agri Rice Mills (Pvt) Ltd',
-    phone: '+94 27 222 3456',
-    email: 'accounts@polonnaruwaricemills.lk',
-    address: 'Mill Road, New Town, Polonnaruwa',
-    taxNumber: '109923847-7000',
-    paymentTerms: '30_days',
-    balance: 485000,
-    status: 'active',
-    createdAt: '2026-10-01',
-  },
-  {
-    id: 'supp_002',
-    code: 'VND-OIL-02',
-    name: 'Lanka Edible Oils & Fats Refineries Ltd',
-    phone: '+94 11 456 7890',
-    email: 'billing@lankaoils.lk',
-    address: 'Sedawatta Road, Wellampitiya, Colombo',
-    taxNumber: '108849201-7000',
-    paymentTerms: '15_days',
-    balance: 720000,
-    status: 'active',
-    createdAt: '2026-10-05',
-  },
-  {
-    id: 'supp_003',
-    code: 'VND-SPICE-03',
-    name: 'Ceylon Spice & Agro Commodities Export Corp',
-    phone: '+94 81 223 9081',
-    email: 'finance@ceylonspicecorp.com',
-    address: 'Peradeniya Road, Kandy',
-    taxNumber: '107738291-7000',
-    paymentTerms: 'immediate',
-    balance: 195000,
-    status: 'active',
-    createdAt: '2026-10-10',
-  },
-];
+export const defaultSuppliers: SupplierRecord[] = [];
 
-export const defaultSupplierBills: PurchaseBillRecord[] = [
-  {
-    id: 'bill_1001',
-    billNumber: 'BILL-2026-089',
-    supplierId: 'supp_001',
-    supplierName: 'Polonnaruwa Agri Rice Mills (Pvt) Ltd',
-    supplierCode: 'VND-RICE-01',
-    poNumber: 'PO-0501',
-    date: '2026-10-12',
-    dueDate: '2026-11-12',
-    originalAmount: 485000,
-    paidAmount: 0,
-    remainingBalance: 485000,
-    status: 'unpaid',
-    notes: 'Bulk Samba & Keeri Samba 50kg Bags procurement',
-    createdAt: '2026-10-12',
-  },
-  {
-    id: 'bill_1002',
-    billNumber: 'BILL-2026-094',
-    supplierId: 'supp_002',
-    supplierName: 'Lanka Edible Oils & Fats Refineries Ltd',
-    supplierCode: 'VND-OIL-02',
-    poNumber: 'PO-0502',
-    date: '2026-10-15',
-    dueDate: '2026-10-30',
-    originalAmount: 720000,
-    paidAmount: 0,
-    remainingBalance: 720000,
-    status: 'unpaid',
-    notes: 'Wholesale Pure Vegetable Cooking Oil Drums (200L)',
-    createdAt: '2026-10-15',
-  },
-  {
-    id: 'bill_1003',
-    billNumber: 'BILL-2026-101',
-    supplierId: 'supp_003',
-    supplierName: 'Ceylon Spice & Agro Commodities Export Corp',
-    supplierCode: 'VND-SPICE-03',
-    poNumber: 'PO-0503',
-    date: '2026-10-20',
-    dueDate: '2026-10-20',
-    originalAmount: 195000,
-    paidAmount: 0,
-    remainingBalance: 195000,
-    status: 'unpaid',
-    notes: 'Premium Grade Bulk Ceylon Cinnamon & Black Pepper',
-    createdAt: '2026-10-20',
-  },
-];
+export const defaultSupplierBills: PurchaseBillRecord[] = [];
 
 const TransactionContext = createContext<TransactionContextType | undefined>(undefined);
 
@@ -661,12 +572,18 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) {
+          // Purge legacy demo vendors
+          const clean = parsed.filter(
+            (s) => !['supp_001', 'supp_002', 'supp_003'].includes(s?.id)
+          );
+          return clean;
+        }
       } catch {
         // fallback
       }
     }
-    return defaultSuppliers;
+    return [];
   });
 
   const [bills, setBills] = useState<PurchaseBillRecord[]>(() => {
@@ -674,12 +591,18 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) {
+          // Purge legacy demo bills
+          const clean = parsed.filter(
+            (b) => !['bill_1001', 'bill_1002', 'bill_1003'].includes(b?.id)
+          );
+          return clean;
+        }
       } catch {
         // fallback
       }
     }
-    return defaultSupplierBills;
+    return [];
   });
 
   const [supplierPayments, setSupplierPayments] = useState<SupplierPaymentRecord[]>(() => {
@@ -1106,6 +1029,12 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return { success: false, error: 'Payment reference number (Cheque #, Bank Ref, or Deposit Slip #) is required for audit verification.' };
       }
 
+      // Verify supplier exists
+      const targetSupplier = suppliers.find((s) => s.id === data.supplierId);
+      if (!targetSupplier) {
+        return { success: false, error: 'Specified supplier does not exist in master records.' };
+      }
+
       // Prevent duplicate payments (same supplier, same reference, same amount)
       const isDuplicate = supplierPayments.some(
         (p) =>
@@ -1125,13 +1054,17 @@ export const TransactionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       let targetBill: PurchaseBillRecord | undefined;
       if (data.billId) {
         targetBill = bills.find((b) => b.id === data.billId);
-        if (targetBill) {
-          if (data.amount > targetBill.remainingBalance && !data.allowOverpaymentOverride) {
-            return {
-              success: false,
-              error: `Payment amount (Rs. ${data.amount.toLocaleString()}) exceeds outstanding bill balance (Rs. ${targetBill.remainingBalance.toLocaleString()}). Check 'Authorized Adjustment' to permit overpayment.`
-            };
-          }
+        if (!targetBill) {
+          return {
+            success: false,
+            error: 'Specified purchase bill could not be found or has already been removed.'
+          };
+        }
+        if (data.amount > targetBill.remainingBalance && !data.allowOverpaymentOverride) {
+          return {
+            success: false,
+            error: `Payment amount (Rs. ${data.amount.toLocaleString()}) exceeds outstanding bill balance (Rs. ${targetBill.remainingBalance.toLocaleString()}). Check 'Authorized Adjustment' to permit overpayment.`
+          };
         }
       }
 

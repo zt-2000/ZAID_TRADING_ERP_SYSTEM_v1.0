@@ -557,15 +557,26 @@ export const SupplierPaymentsPage: React.FC<SupplierPaymentsPageProps> = ({
                     setSelectedBillId('');
                     setPaymentAmount('');
                   }}
-                  className="w-full bg-slate-50 dark:bg-[#151b18] border border-slate-200 dark:border-neutral-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-[#167a53]"
+                  disabled={suppliers.length === 0}
+                  className="w-full bg-slate-50 dark:bg-[#151b18] border border-slate-200 dark:border-neutral-700 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-[#167a53] disabled:opacity-50"
                 >
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.code}) — Balance: {formatCurrency(s.balance, currencySymbol)}
-                    </option>
-                  ))}
+                  {suppliers.length === 0 ? (
+                    <option value="">No registered suppliers found</option>
+                  ) : (
+                    suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.code}) — Balance: {formatCurrency(s.balance, currencySymbol)}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
+
+              {suppliers.length === 0 && (
+                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-[11px] text-amber-800 dark:text-amber-300">
+                  No suppliers registered on file. Please create a supplier account in the Suppliers directory before posting payments.
+                </div>
+              )}
 
               {currentSupplier && (
                 <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-neutral-400">

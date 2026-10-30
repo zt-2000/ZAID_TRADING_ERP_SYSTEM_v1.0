@@ -173,8 +173,8 @@ export const AppShell: React.FC<AppShellProps> = ({
     }
   };
 
-  // If Supabase authentication is active and user is not signed in, show secure login workstation
-  if (isSupabaseConfigured() && !currentUser && !loading) {
+  // In production or when Supabase is configured, require authentication
+  if ((isSupabaseConfigured() || import.meta.env.PROD) && !currentUser && !loading) {
     return <AuthLoginView companySettings={companySettings} />;
   }
 
